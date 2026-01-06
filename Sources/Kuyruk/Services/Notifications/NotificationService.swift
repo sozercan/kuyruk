@@ -20,8 +20,7 @@ final class NotificationService {
         if !self.isAvailable {
             DiagnosticsLogger.warning(
                 "NotificationService unavailable - no bundle identifier (running via swift run?)",
-                category: .ui
-            )
+                category: .ui)
         }
     }
 

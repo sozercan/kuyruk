@@ -138,7 +138,9 @@ final class DataStore {
 
     /// Permanently deletes old notifications.
     func cleanupOldNotifications(olderThan days: Int = 30) throws {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            return
+        }
 
         let descriptor = FetchDescriptor<CachedNotification>(
             predicate: #Predicate { $0.lastSyncedAt < cutoffDate })

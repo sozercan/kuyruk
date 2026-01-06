@@ -3,7 +3,7 @@ import Security
 
 /// Manages secure storage of OAuth tokens in the macOS Keychain.
 @MainActor
-final class KeychainManager: Sendable {
+final class KeychainManager {
     /// Shared instance
     static let shared = KeychainManager()
 

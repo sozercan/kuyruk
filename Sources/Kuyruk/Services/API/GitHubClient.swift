@@ -222,7 +222,9 @@ final class GitHubClient {
             throw GitHubError.unauthorized
         }
 
-        var components = URLComponents(string: baseUrl + endpoint.path)!
+        guard var components = URLComponents(string: baseUrl + endpoint.path) else {
+            throw GitHubError.invalidResponse
+        }
         components.queryItems = endpoint.queryItems
 
         guard let url = components.url else {

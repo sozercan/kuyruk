@@ -63,8 +63,8 @@ struct MainWindow: View {
     @ViewBuilder
     private var unauthenticatedContent: some View {
         VStack(spacing: 24) {
-            switch authService.state {
-            case .waitingForUserAuth(let deviceState):
+            switch self.authService.state {
+            case let .waitingForUserAuth(deviceState):
                 self.deviceFlowContent(deviceState)
 
             case .requestingDeviceCode:

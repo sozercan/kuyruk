@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         // Set up menu bar icon
-        setupMenuBarItem()
+        self.setupMenuBarItem()
 
         // Configure app behavior
         NSApp.setActivationPolicy(.regular)
@@ -57,27 +57,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Bar
 
     private func setupMenuBarItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: "Notifications")
-            button.action = #selector(menuBarItemClicked)
+            button.action = #selector(self.menuBarItemClicked)
             button.target = self
         }
 
         // Build menu
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Open Kuyruk", action: #selector(openMainWindow), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: "Open Kuyruk", action: #selector(self.openMainWindow), keyEquivalent: "o"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Refresh Notifications", action: #selector(refreshNotifications), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(
+            title: "Refresh Notifications",
+            action: #selector(self.refreshNotifications),
+            keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Kuyruk", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Kuyruk", action: #selector(self.quitApp), keyEquivalent: "q"))
 
-        statusItem?.menu = menu
+        self.statusItem?.menu = menu
     }
 
     @objc private func menuBarItemClicked() {
-        openMainWindow()
+        self.openMainWindow()
     }
 
     @objc private func openMainWindow() {

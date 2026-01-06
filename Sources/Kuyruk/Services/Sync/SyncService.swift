@@ -138,7 +138,6 @@ final class SyncService {
 
             self.lastSyncedAt = Date()
             DiagnosticsLogger.info("Sync completed successfully", category: .sync)
-
         } catch {
             self.lastError = error
             DiagnosticsLogger.error(error, context: "sync", category: .sync)

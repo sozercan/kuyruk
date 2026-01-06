@@ -74,7 +74,6 @@ final class NotificationsViewModel {
             // Convert cached notifications to GitHubNotification
             // For now, we'll trigger a refresh to get fresh data
             DiagnosticsLogger.info("Found \(cached.count) cached notifications", category: .ui)
-
         } catch {
             DiagnosticsLogger.error(error, context: "loadFromCache", category: .ui)
         }
@@ -106,7 +105,6 @@ final class NotificationsViewModel {
             DiagnosticsLogger.info(
                 "Loaded \(self.notifications.count) notifications from \(self.repositories.count) repositories",
                 category: .ui)
-
         } catch {
             self.error = error
             DiagnosticsLogger.error(error, context: "refresh", category: .ui)
@@ -145,7 +143,6 @@ final class NotificationsViewModel {
 
             // Update cache
             try self.dataStore.markAsRead(notificationId: notification.id)
-
         } catch {
             DiagnosticsLogger.error(error, context: "markAsRead", category: .ui)
         }

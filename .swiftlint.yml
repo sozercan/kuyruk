@@ -1,0 +1,53 @@
+# SwiftLint configuration for Kuyruk
+
+excluded:
+  - .build
+  - .swiftpm
+  - Package.swift
+  - scripts
+  - Tests  # Tests can use force unwrapping for brevity
+  - Sources/APIExplorer  # CLI tool has different conventions
+
+# Disable rules that conflict with project conventions
+disabled_rules:
+  - trailing_comma # We use trailing commas
+  - identifier_name # Allow short names like vm, ui
+  - file_length # Tests may be longer
+  - function_body_length # Some SwiftUI views are complex
+
+# Opt-in rules
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - modifier_order
+  - overridden_super_call
+  - private_action
+  - private_outlet
+  - sorted_first_last
+  - toggle_bool
+  - unused_import
+  - vertical_whitespace_closing_braces
+  - vertical_whitespace_opening_braces
+
+# Line length configuration
+line_length:
+  warning: 120
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+# Type body length
+type_body_length:
+  warning: 300
+  error: 500
+
+# Nesting
+nesting:
+  type_level: 3
+  function_level: 5
+
+# Reporter type (xcode, json, csv, checkstyle, junit, html, emoji, sonarqube, markdown, github-actions-logging)
+reporter: xcode

@@ -103,18 +103,15 @@ final class AuthService {
                 userCode: deviceResponse.userCode,
                 verificationUri: deviceResponse.verificationUri,
                 expiresIn: deviceResponse.expiresIn,
-                interval: deviceResponse.interval
-            )
+                interval: deviceResponse.interval)
             self.state = .waitingForUserAuth(deviceState)
 
             DiagnosticsLogger.info(
                 "Device code received. User code: \(deviceResponse.userCode)",
-                category: .auth
-            )
+                category: .auth)
 
             // Step 2: Poll for user authorization
-            await pollForAuthorization(deviceCode: deviceResponse.deviceCode, interval: deviceResponse.interval)
-
+            await self.pollForAuthorization(deviceCode: deviceResponse.deviceCode, interval: deviceResponse.interval)
         } catch {
             DiagnosticsLogger.error(error, context: "login", category: .auth)
             self.state = .error(error.localizedDescription)
@@ -123,8 +120,8 @@ final class AuthService {
 
     /// Cancels the current login flow.
     func cancelLogin() {
-        pollingTask?.cancel()
-        pollingTask = nil
+        self.pollingTask?.cancel()
+        self.pollingTask = nil
         self.state = .unauthenticated
         DiagnosticsLogger.info("Login cancelled", category: .auth)
     }
@@ -133,8 +130,8 @@ final class AuthService {
     func logout() async {
         DiagnosticsLogger.info("Logging out", category: .auth)
 
-        pollingTask?.cancel()
-        pollingTask = nil
+        self.pollingTask?.cancel()
+        self.pollingTask = nil
 
         do {
             try self.keychainManager.clearAll()
@@ -149,12 +146,16 @@ final class AuthService {
     // MARK: - Device Flow Implementation
 
     private func requestDeviceCode() async throws -> DeviceCodeResponse {
-        var request = URLRequest(url: URL(string: OAuthConfig.deviceCodeUrl)!)
+        guard let deviceCodeUrl = URL(string: OAuthConfig.deviceCodeUrl) else {
+            throw GitHubError.invalidResponse
+        }
+        var request = URLRequest(url: deviceCodeUrl)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let scopeEncoded = OAuthConfig.scope.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? OAuthConfig.scope
+        let scopeEncoded = OAuthConfig.scope
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? OAuthConfig.scope
         let body = "client_id=\(OAuthConfig.clientId)&scope=\(scopeEncoded)"
         request.httpBody = body.data(using: .utf8)
 
@@ -174,7 +175,7 @@ final class AuthService {
     private func pollForAuthorization(deviceCode: String, interval: Int) async {
         var pollInterval = interval
 
-        pollingTask = Task {
+        self.pollingTask = Task {
             while !Task.isCancelled {
                 // Wait for the specified interval
                 try? await Task.sleep(for: .seconds(pollInterval))
@@ -207,7 +208,6 @@ final class AuthService {
                         self.state = .error(message)
                         return
                     }
-
                 } catch {
                     DiagnosticsLogger.error(error, context: "pollForAuthorization", category: .auth)
                     self.state = .error(error.localizedDescription)
@@ -216,11 +216,14 @@ final class AuthService {
             }
         }
 
-        await pollingTask?.value
+        await self.pollingTask?.value
     }
 
     private func checkAuthorization(deviceCode: String) async throws -> AuthorizationResult {
-        var request = URLRequest(url: URL(string: OAuthConfig.tokenUrl)!)
+        guard let tokenUrl = URL(string: OAuthConfig.tokenUrl) else {
+            throw GitHubError.invalidResponse
+        }
+        var request = URLRequest(url: tokenUrl)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -280,7 +283,8 @@ final class AuthService {
 
         DiagnosticsLogger.info("Validating token", category: .auth)
 
-        var request = URLRequest(url: URL(string: "https://api.github.com/user")!)
+        guard let userUrl = URL(string: "https://api.github.com/user") else { return }
+        var request = URLRequest(url: userUrl)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
@@ -298,10 +302,10 @@ final class AuthService {
                 self.currentUser = try decoder.decode(GitHubUser.self, from: data)
                 DiagnosticsLogger.info(
                     "Token valid, user: \(self.currentUser?.login ?? "unknown")",
-                    category: .auth
-                )
+                    category: .auth)
 
-            case 401, 403:
+            case 401,
+                 403:
                 DiagnosticsLogger.warning("Token invalid or expired", category: .auth)
                 try? self.keychainManager.clearAll()
                 self.state = .unauthenticated
@@ -309,7 +313,6 @@ final class AuthService {
             default:
                 throw GitHubError.httpError(httpResponse.statusCode)
             }
-
         } catch {
             DiagnosticsLogger.error(error, context: "validateToken", category: .auth)
             // Don't log out on network errors, just log the issue

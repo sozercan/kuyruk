@@ -291,7 +291,7 @@ struct AuthStateTests {
     func authStateIsAuthenticated() {
         #expect(!AuthState.unknown.isAuthenticated)
         #expect(!AuthState.unauthenticated.isAuthenticated)
-        #expect(!AuthState.authenticating.isAuthenticated)
+        #expect(!AuthState.requestingDeviceCode.isAuthenticated)
         #expect(AuthState.authenticated("test-token").isAuthenticated)
         #expect(!AuthState.error("Some error").isAuthenticated)
     }
