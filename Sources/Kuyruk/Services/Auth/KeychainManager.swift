@@ -65,13 +65,35 @@ final class KeychainManager {
         // Delete existing item first
         try? self.delete(forKey: key)
 
-        let query: [String: Any] = [
+        // Create access that allows any application to access this item.
+        // This avoids repeated Keychain prompts when using ad-hoc signing during development,
+        // since each build produces a different code signature.
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: self.serviceName,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
+
+        #if DEBUG
+        // In DEBUG builds, create an access object that allows any application.
+        // An empty trusted application list (nil) means "allow all applications".
+        // Note: SecAccessCreate is deprecated but still functional - it's the only way
+        // to create a Keychain item that doesn't require app signature verification.
+        var access: SecAccess?
+        withUnsafeMutablePointer(to: &access) { accessPtr in
+            // Silence deprecation warning - this API is deprecated but has no replacement
+            // for creating signature-independent Keychain access in development.
+            _ = SecAccessCreate(
+                "Kuyruk GitHub Token" as CFString,
+                nil, // nil = allow any application (no trusted app list)
+                accessPtr)
+        }
+        if let access {
+            query[kSecAttrAccess as String] = access
+        }
+        #endif
 
         let status = SecItemAdd(query as CFDictionary, nil)
 

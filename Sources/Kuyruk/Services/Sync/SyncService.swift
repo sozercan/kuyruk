@@ -20,7 +20,7 @@ final class SyncService {
 
     /// Sync interval in seconds (configurable)
     var syncInterval: TimeInterval {
-        TimeInterval(UserDefaults.standard.integer(forKey: "syncInterval").clamped(to: 30 ... 900))
+        TimeInterval(UserDefaults.standard.integer(forKey: "syncInterval").clamped(to: 30...900))
     }
 
     private let gitHubClient: GitHubClient
@@ -159,8 +159,8 @@ final class SyncService {
 
 // MARK: - Helpers
 
-private extension Int {
-    func clamped(to range: ClosedRange<Int>) -> Int {
+extension Int {
+    fileprivate func clamped(to range: ClosedRange<Int>) -> Int {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

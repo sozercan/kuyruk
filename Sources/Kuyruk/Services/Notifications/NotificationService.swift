@@ -92,7 +92,7 @@ final class NotificationService {
         let request = UNNotificationRequest(
             identifier: notification.id,
             content: content,
-            trigger: nil // Deliver immediately
+            trigger: nil, // Deliver immediately
         )
 
         do {

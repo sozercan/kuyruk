@@ -242,7 +242,7 @@ final class GitHubClient {
 
     private func handleResponseStatus(_ response: HTTPURLResponse) throws {
         switch response.statusCode {
-        case 200 ... 299:
+        case 200...299:
             return // Success
 
         case 304:
@@ -258,7 +258,7 @@ final class GitHubClient {
         case 429:
             throw GitHubError.rateLimited(resetDate: self.rateLimitReset)
 
-        case 500 ... 599:
+        case 500...599:
             throw GitHubError.serverError
 
         default:

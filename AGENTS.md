@@ -198,6 +198,9 @@ if #available(macOS 26, *) {
 | File | Purpose |
 |------|---------|
 | `Package.swift` | Swift Package Manager manifest |
+| `version.env` | Version info sourced by build scripts |
+| `scripts/compile_and_run.sh` | Dev loop: kill, build, package, launch, verify |
+| `scripts/build-app.sh` | Package app bundle with signing |
 | `Sources/APIExplorer/main.swift` | API explorer CLI (run before implementing API features) |
 | `Sources/Kuyruk/KuyrukApp.swift` | App entry point with @main |
 | `Sources/Kuyruk/AppDelegate.swift` | Window lifecycle, menu bar support |
@@ -212,23 +215,35 @@ if #available(macOS 26, *) {
 ### Build Commands
 
 ```bash
+# Development loop (kill, build, package, launch, verify)
+./scripts/compile_and_run.sh
+
+# Development loop with tests
+./scripts/compile_and_run.sh --test
+
+# Development loop with linting
+./scripts/compile_and_run.sh --lint
+
 # Build (SPM - preferred)
 swift build
 
 # Build release
 swift build -c release
 
+# Package app bundle
+./scripts/build-app.sh
+
+# Package app bundle (debug)
+./scripts/build-app.sh debug
+
+# Universal build (arm64 + x86_64)
+ARCHES="arm64 x86_64" ./scripts/build-app.sh
+
 # Unit Tests (SPM)
 swift test
 
-# Build (Xcode - for UI tests or code signing)
-xcodebuild -scheme Kuyruk -destination 'platform=macOS' build
-
-# Unit Tests (Xcode - for specific test targeting)
-xcodebuild -scheme Kuyruk -destination 'platform=macOS' test -only-testing:KuyrukTests
-
 # Lint & Format
-swiftlint --strict && swiftformat .
+swiftformat . && swiftlint --strict
 ```
 
 ### Test Execution Rules
