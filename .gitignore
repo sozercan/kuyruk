@@ -1,0 +1,101 @@
+# Xcode
+*.xcodeproj
+xcuserdata/
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.xcsettings
+
+# Build outputs
+build/
+DerivedData/
+*.build/
+.build/
+*.app
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+Packages/
+
+# CocoaPods (if ever used)
+Pods/
+Podfile.lock
+
+# Carthage (if ever used)
+Carthage/Build/
+Carthage/Checkouts/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+
+# Code coverage
+*.gcno
+*.gcda
+*.profraw
+*.profdata
+codecov/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Secrets and credentials
+*.pem
+*.p12
+*.key
+*.mobileprovision
+*.provisionprofile
+AuthKey_*.p8
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Documentation build output
+docs/_build/
+
+# Testing
+*.xcresult/
+test_output/

@@ -1,0 +1,49 @@
+# SwiftFormat configuration for Kuyruk
+
+--swiftversion 6.0
+
+# Insert explicit self for properties and methods
+--self insert
+
+# Indentation
+--indent 4
+--tabwidth 4
+--indentcase false
+
+# Wrapping
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--wrapconditions after-first
+--wrapreturntype preserve
+--closingparen same-line
+
+# Spacing
+--operatorfunc spaced
+--ranges spaced
+--emptybraces no-space
+
+# Braces
+--allman false
+
+# Other
+--stripunusedargs closure-only
+--maxwidth 120
+--semicolons never
+--commas always
+--trimwhitespace always
+--linebreaks lf
+--header ignore
+
+# Organize declarations
+--organizetypes class,struct,enum,extension
+
+# Disable rules
+--disable wrapMultilineStatementBraces
+--disable blankLinesAtEndOfScope
+--disable blankLinesAtStartOfScope
+
+# Enable rules
+--enable isEmpty
+--enable wrapEnumCases
+--enable wrapSwitchCases
