@@ -8,11 +8,13 @@ struct NotificationDetailView: View {
         Group {
             if let notification = viewModel.selectedNotification {
                 self.detailContent(for: notification)
+                    .id(notification.id)
             } else {
                 self.emptyState
             }
         }
         .frame(minWidth: 300)
+        .animation(.easeInOut(duration: 0.15), value: viewModel.selectedNotification?.id)
     }
 
     // MARK: - Empty State
@@ -88,10 +90,10 @@ struct NotificationDetailView: View {
         if #available(macOS 26, *) {
             GlassEffectContainer(spacing: 12) {
                 self.infoGrid(for: notification)
+                    .glassEffect(in: .rect(cornerRadius: 12))
             }
         } else {
             self.infoGrid(for: notification)
-                .padding()
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -112,7 +114,6 @@ struct NotificationDetailView: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .glassEffect(in: .rect(cornerRadius: 12))
     }
 
     @ViewBuilder

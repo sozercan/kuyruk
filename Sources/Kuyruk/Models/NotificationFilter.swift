@@ -81,7 +81,8 @@ enum NotificationFilter: Hashable, Identifiable, Sendable {
     func matches(_ notification: GitHubNotification) -> Bool {
         switch self {
         case .inbox:
-            true
+            // Inbox shows only unread notifications (like GitHub's default view)
+            notification.unread
         case .unread:
             notification.unread
         case .participating:

@@ -10,6 +10,9 @@ final class DataStore {
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
 
+    /// Batch size for bulk operations
+    private let batchSize = 100
+
     // MARK: - Initialization
 
     init() throws {
@@ -28,7 +31,7 @@ final class DataStore {
             configurations: [modelConfiguration])
 
         self.modelContext = ModelContext(self.modelContainer)
-        self.modelContext.autosaveEnabled = true
+        self.modelContext.autosaveEnabled = false // Manual saves for batching
 
         DiagnosticsLogger.info("DataStore initialized", category: .data)
     }
@@ -50,29 +53,49 @@ final class DataStore {
             configurations: [modelConfiguration])
 
         self.modelContext = ModelContext(self.modelContainer)
-        self.modelContext.autosaveEnabled = true
+        self.modelContext.autosaveEnabled = false
     }
 
     // MARK: - Notifications
 
-    /// Saves or updates notifications from the API.
+    /// Saves or updates notifications from the API using batch operations.
     func saveNotifications(_ notifications: [GitHubNotification]) throws {
-        DiagnosticsLogger.debug("Saving \(notifications.count) notifications", category: .data)
+        guard !notifications.isEmpty else { return }
 
-        for notification in notifications {
-            let descriptor = FetchDescriptor<CachedNotification>(
-                predicate: #Predicate { $0.id == notification.id })
+        DiagnosticsLogger.debug("Saving \(notifications.count) notifications (batched)", category: .data)
 
-            if let existing = try modelContext.fetch(descriptor).first {
-                existing.update(from: notification)
-            } else {
-                let cached = CachedNotification(from: notification)
-                self.modelContext.insert(cached)
+        // Fetch all existing IDs in one query
+        let existingIds = try self.fetchExistingNotificationIds()
+
+        // Process in batches
+        for batch in notifications.chunked(into: self.batchSize) {
+            for notification in batch {
+                if existingIds.contains(notification.id) {
+                    // Update existing
+                    let descriptor = FetchDescriptor<CachedNotification>(
+                        predicate: #Predicate { $0.id == notification.id })
+
+                    if let existing = try modelContext.fetch(descriptor).first {
+                        existing.update(from: notification)
+                    }
+                } else {
+                    // Insert new
+                    let cached = CachedNotification(from: notification)
+                    self.modelContext.insert(cached)
+                }
             }
         }
 
+        // Single save at the end
         try self.modelContext.save()
         DiagnosticsLogger.info("Saved \(notifications.count) notifications", category: .data)
+    }
+
+    /// Fetches all existing notification IDs for efficient lookup.
+    private func fetchExistingNotificationIds() throws -> Set<String> {
+        let descriptor = FetchDescriptor<CachedNotification>()
+        let notifications = try self.modelContext.fetch(descriptor)
+        return Set(notifications.map(\.id))
     }
 
     /// Fetches all cached notifications.
@@ -157,14 +180,21 @@ final class DataStore {
 
     // MARK: - Repositories
 
-    /// Saves or updates repositories.
+    /// Saves or updates repositories using batch operations.
     func saveRepositories(_ repositories: [Repository]) throws {
-        for repository in repositories {
-            let descriptor = FetchDescriptor<CachedRepository>(
-                predicate: #Predicate { $0.id == repository.id })
+        guard !repositories.isEmpty else { return }
 
-            if let existing = try modelContext.fetch(descriptor).first {
-                existing.update(from: repository)
+        // Fetch all existing IDs in one query
+        let existingIds = try self.fetchExistingRepositoryIds()
+
+        for repository in repositories {
+            if existingIds.contains(repository.id) {
+                let descriptor = FetchDescriptor<CachedRepository>(
+                    predicate: #Predicate { $0.id == repository.id })
+
+                if let existing = try modelContext.fetch(descriptor).first {
+                    existing.update(from: repository)
+                }
             } else {
                 let cached = CachedRepository(from: repository)
                 self.modelContext.insert(cached)
@@ -172,6 +202,13 @@ final class DataStore {
         }
 
         try self.modelContext.save()
+    }
+
+    /// Fetches all existing repository IDs for efficient lookup.
+    private func fetchExistingRepositoryIds() throws -> Set<Int> {
+        let descriptor = FetchDescriptor<CachedRepository>()
+        let repositories = try self.modelContext.fetch(descriptor)
+        return Set(repositories.map(\.id))
     }
 
     /// Fetches all cached repositories.
@@ -186,12 +223,19 @@ final class DataStore {
     func updateRepositoryUnreadCounts() throws {
         let repos = try self.fetchCachedRepositories()
 
+        var hasChanges = false
         for repo in repos {
             let notifications = try self.fetchNotifications(forRepositoryId: repo.id)
-            repo.unreadCount = notifications.filter(\.unread).count
+            let newCount = notifications.filter(\.unread).count
+            if repo.unreadCount != newCount {
+                repo.unreadCount = newCount
+                hasChanges = true
+            }
         }
 
-        try self.modelContext.save()
+        if hasChanges {
+            try self.modelContext.save()
+        }
     }
 
     // MARK: - Container Access
@@ -199,5 +243,17 @@ final class DataStore {
     /// Returns the model container for use with SwiftUI's modelContainer modifier.
     var container: ModelContainer {
         self.modelContainer
+    }
+}
+
+// MARK: - Array Extension
+
+extension Array {
+    /// Splits the array into chunks of the specified size.
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }

@@ -10,7 +10,7 @@ struct NotificationListView: View {
         Group {
             if self.viewModel.isLoading, self.viewModel.notifications.isEmpty {
                 self.loadingState
-            } else if self.viewModel.filteredNotifications.isEmpty {
+            } else if self.viewModel.groupedNotifications.isEmpty {
                 self.emptyState
             } else {
                 self.notificationsList
@@ -63,8 +63,8 @@ struct NotificationListView: View {
             set: { id in
                 self.viewModel.selectedNotification = self.viewModel.filteredNotifications.first { $0.id == id }
             })) {
-                // Group by repository
-                ForEach(self.groupedNotifications, id: \.key) { repoName, notifications in
+                // Use pre-computed grouped notifications
+                ForEach(self.viewModel.groupedNotifications, id: \.key) { repoName, notifications in
                     Section {
                         ForEach(notifications) { notification in
                             NotificationRowView(notification: notification)
@@ -105,6 +105,24 @@ struct NotificationListView: View {
                 }
             }
             .listStyle(.inset)
+                .overlay(alignment: .top) {
+                    // Show refreshing indicator at top when updating in background
+                    if self.viewModel.isRefreshing {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Updating...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.2), value: self.viewModel.isRefreshing)
+                    }
+                }
     }
 
     @ViewBuilder
@@ -151,7 +169,7 @@ struct NotificationListView: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .keyboardShortcut("r", modifiers: .command)
-            .disabled(self.viewModel.isLoading)
+            .disabled(self.viewModel.isLoading || self.viewModel.isRefreshing)
         }
 
         ToolbarItem(placement: .automatic) {
@@ -160,13 +178,6 @@ struct NotificationListView: View {
                     .controlSize(.small)
             }
         }
-    }
-
-    // MARK: - Helpers
-
-    private var groupedNotifications: [(key: String, value: [GitHubNotification])] {
-        let grouped = Dictionary(grouping: viewModel.filteredNotifications) { $0.repository.fullName }
-        return grouped.sorted { $0.key < $1.key }
     }
 }
 

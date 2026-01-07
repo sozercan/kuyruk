@@ -55,6 +55,9 @@
 --commas always
 --header ignore
 
+# Modifier order (match swiftlint expectations)
+--modifierorder nonisolated,private,fileprivate,internal,public,open,final,required,override,convenience,lazy,dynamic,static,class,weak,unowned,mutating,nonmutating
+
 # Disable rules
 --disable wrapMultilineStatementBraces
 --disable blankLinesAtEndOfScope

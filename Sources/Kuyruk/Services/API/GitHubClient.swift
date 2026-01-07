@@ -119,6 +119,70 @@ final class GitHubClient {
     private(set) var rateLimitRemaining: Int?
     private(set) var rateLimitReset: Date?
 
+    // MARK: - Conditional Request Caching (Persisted)
+
+    /// UserDefaults keys for persisting conditional headers
+    private enum CacheKeys {
+        static let etag = "notifications.etag"
+        static let lastModified = "notifications.lastModified"
+        static let cacheTimestamp = "notifications.cacheTimestamp"
+    }
+
+    /// Cached ETag for notifications endpoint (persisted to UserDefaults)
+    private var notificationsETag: String? {
+        get { UserDefaults.standard.string(forKey: CacheKeys.etag) }
+        set { UserDefaults.standard.set(newValue, forKey: CacheKeys.etag) }
+    }
+
+    /// Cached Last-Modified for notifications endpoint (persisted to UserDefaults)
+    private var notificationsLastModified: String? {
+        get { UserDefaults.standard.string(forKey: CacheKeys.lastModified) }
+        set { UserDefaults.standard.set(newValue, forKey: CacheKeys.lastModified) }
+    }
+
+    /// Maximum concurrent pages to fetch in parallel
+    private let maxParallelPages = 5
+
+    // MARK: - TTL Cache
+
+    /// Cached notifications with timestamp (in-memory only for performance)
+    private var cachedNotifications: [GitHubNotification]?
+
+    /// When the cache was last updated (persisted for cross-session TTL)
+    private var cacheTimestamp: Date? {
+        get { UserDefaults.standard.object(forKey: CacheKeys.cacheTimestamp) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: CacheKeys.cacheTimestamp) }
+    }
+
+    /// Cache TTL in seconds (default: 30 seconds)
+    /// Can be configured via UserDefaults "notificationCacheTTL"
+    var cacheTTL: TimeInterval {
+        let userTTL = UserDefaults.standard.integer(forKey: "notificationCacheTTL")
+        return userTTL > 0 ? TimeInterval(userTTL) : 30
+    }
+
+    /// Whether the cache is still valid (public for UI decisions)
+    /// Note: On app restart, in-memory cache is empty but we still have ETag for 304
+    var isCacheValid: Bool {
+        guard let timestamp = cacheTimestamp, cachedNotifications != nil else {
+            return false
+        }
+        return Date().timeIntervalSince(timestamp) < self.cacheTTL
+    }
+
+    /// Whether we have persisted conditional headers for 304 optimization
+    var hasConditionalHeaders: Bool {
+        notificationsETag != nil || notificationsLastModified != nil
+    }
+
+    /// Time remaining until cache expires (for UI display)
+    var cacheTimeRemaining: TimeInterval? {
+        guard let timestamp = cacheTimestamp else { return nil }
+        let elapsed = Date().timeIntervalSince(timestamp)
+        let remaining = self.cacheTTL - elapsed
+        return remaining > 0 ? remaining : nil
+    }
+
     // MARK: - Initialization
 
     init(authService: AuthService, session: URLSession = .shared) {
@@ -145,27 +209,296 @@ final class GitHubClient {
         return try await self.request(endpoint)
     }
 
-    /// Fetches all pages of notifications.
-    func fetchAllNotifications(all: Bool = false, participating: Bool = false) async throws -> [GitHubNotification] {
+    /// Fetches all pages of notifications using parallel requests.
+    /// Returns nil if data hasn't changed (304 Not Modified).
+    func fetchAllNotifications(
+        all: Bool = false,
+        participating: Bool = false) async throws -> [GitHubNotification]? {
+        // First, try a conditional request to check if data changed
+        let firstPageResult = try await self.fetchNotificationsConditional(
+            all: all,
+            participating: participating,
+            page: 1)
+
+        switch firstPageResult {
+        case .notModified:
+            DiagnosticsLogger.info("Notifications not modified (304)", category: .api)
+            return nil
+
+        case let .success(firstPage, hasMore):
+            var allNotifications = firstPage
+
+            if hasMore {
+                // Fetch remaining pages in parallel
+                let additionalPages = try await self.fetchRemainingPagesParallel(
+                    all: all,
+                    participating: participating,
+                    startPage: 2)
+                allNotifications.append(contentsOf: additionalPages)
+            }
+
+            DiagnosticsLogger.info("Fetched \(allNotifications.count) notifications total", category: .api)
+            return allNotifications
+        }
+    }
+
+    /// Fetches notifications progressively, calling the handler as each batch arrives.
+    /// This allows the UI to update immediately with the first page while more load.
+    /// Uses TTL cache to avoid unnecessary network requests.
+    /// - Parameters:
+    ///   - all: Include read notifications
+    ///   - participating: Only notifications where user is participating
+    ///   - onBatchReceived: Called with accumulated notifications after each batch
+    /// - Returns: Final array of all notifications, or nil if cache is valid/304 Not Modified
+    func fetchAllNotificationsProgressive(
+        all: Bool = false,
+        participating: Bool = false,
+        onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification]? {
+        // Check TTL cache first
+        if self.isCacheValid, let cached = cachedNotifications {
+            DiagnosticsLogger.info("Using cached notifications (TTL: \(Int(self.cacheTTL))s)", category: .api)
+            onBatchReceived(cached)
+            return nil // nil means "use existing data"
+        }
+
+        // First, try a conditional request to check if data changed
+        let firstPageResult = try await self.fetchNotificationsConditional(
+            all: all,
+            participating: participating,
+            page: 1)
+
+        switch firstPageResult {
+        case .notModified:
+            DiagnosticsLogger.info("Notifications not modified (304)", category: .api)
+            // Update cache timestamp even on 304
+            self.cacheTimestamp = Date()
+            return nil
+
+        case let .success(firstPage, hasMore):
+            // Immediately update UI with first page
+            onBatchReceived(firstPage)
+
+            var allNotifications = firstPage
+
+            if hasMore {
+                // Fetch remaining pages progressively
+                allNotifications = try await self.fetchRemainingPagesProgressively(
+                    all: all,
+                    participating: participating,
+                    startPage: 2,
+                    existingNotifications: firstPage,
+                    onBatchReceived: onBatchReceived)
+            }
+
+            // Update cache
+            self.cachedNotifications = allNotifications
+            self.cacheTimestamp = Date()
+
+            DiagnosticsLogger.info("Fetched \(allNotifications.count) notifications total", category: .api)
+            return allNotifications
+        }
+    }
+
+    /// Fetches all notifications (non-optional for backward compatibility).
+    func fetchAllNotificationsForced(
+        all: Bool = false,
+        participating: Bool = false) async throws -> [GitHubNotification] {
+        // Clear all caches to force a fresh fetch
+        self.invalidateCache()
+
+        return try await self.fetchAllNotifications(all: all, participating: participating) ?? []
+    }
+
+    /// Invalidates the notifications cache, forcing the next fetch to hit the network.
+    func invalidateCache() {
+        self.cachedNotifications = nil
+        self.cacheTimestamp = nil
+        self.notificationsETag = nil
+        self.notificationsLastModified = nil
+        DiagnosticsLogger.debug("Notifications cache invalidated", category: .api)
+    }
+
+    /// Updates the cache after a local change (e.g., marking as read).
+    func updateCachedNotification(_ notification: GitHubNotification) {
+        guard var cached = cachedNotifications else { return }
+        if let index = cached.firstIndex(where: { $0.id == notification.id }) {
+            cached[index] = notification
+            self.cachedNotifications = cached
+        }
+    }
+
+    // MARK: - Private Pagination Methods
+
+    private enum ConditionalResult {
+        case notModified
+        case success([GitHubNotification], hasMore: Bool)
+    }
+
+    private func fetchNotificationsConditional(
+        all: Bool,
+        participating: Bool,
+        page: Int) async throws -> ConditionalResult {
+        let endpoint = GitHubEndpoint.notifications(all: all, participating: participating, page: page)
+        var request = try self.buildRequest(for: endpoint)
+
+        // Add conditional headers
+        if let etag = notificationsETag {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        if let lastModified = notificationsLastModified {
+            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        }
+
+        DiagnosticsLogger.info("Request: \(endpoint.method) \(endpoint.path) (conditional)", category: .api)
+
+        let (data, response) = try await self.session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GitHubError.invalidResponse
+        }
+
+        self.updateRateLimitInfo(from: httpResponse)
+
+        // Handle 304 Not Modified
+        if httpResponse.statusCode == 304 {
+            return .notModified
+        }
+
+        try self.handleResponseStatus(httpResponse)
+
+        // Store conditional headers for next request
+        if let etag = httpResponse.value(forHTTPHeaderField: "ETag") {
+            self.notificationsETag = etag
+        }
+        if let lastModified = httpResponse.value(forHTTPHeaderField: "Last-Modified") {
+            self.notificationsLastModified = lastModified
+        }
+
+        do {
+            let notifications = try self.decoder.decode([GitHubNotification].self, from: data)
+            let hasMore = notifications.count == 50
+            return .success(notifications, hasMore: hasMore)
+        } catch {
+            DiagnosticsLogger.error(error, context: "Decoding notifications", category: .api)
+            throw GitHubError.decodingError(error.localizedDescription)
+        }
+    }
+
+    private func fetchRemainingPagesParallel(
+        all: Bool,
+        participating: Bool,
+        startPage: Int) async throws -> [GitHubNotification] {
         var allNotifications: [GitHubNotification] = []
-        var page = 1
-        var hasMore = true
+        var currentPage = startPage
 
-        while hasMore {
-            let notifications: [GitHubNotification] = try await self.fetchNotifications(
-                all: all,
-                participating: participating,
-                page: page)
+        while true {
+            // Fetch up to maxParallelPages concurrently
+            let pagesToFetch = currentPage...(currentPage + self.maxParallelPages - 1)
 
-            allNotifications.append(contentsOf: notifications)
+            let results = try await withThrowingTaskGroup(
+                of: (page: Int, notifications: [GitHubNotification]).self) { group in
+                    for page in pagesToFetch {
+                        group.addTask {
+                            let notifications = try await self.fetchNotifications(
+                                all: all,
+                                participating: participating,
+                                page: page)
+                            return (page: page, notifications: notifications)
+                        }
+                    }
 
-            // GitHub returns 50 per page max
-            hasMore = notifications.count == 50
-            page += 1
+                    var pageResults: [(page: Int, notifications: [GitHubNotification])] = []
+                    for try await result in group {
+                        pageResults.append(result)
+                    }
+                    return pageResults.sorted { $0.page < $1.page }
+                }
+
+            // Process results in page order
+            var continuesFetching = false
+            for result in results {
+                allNotifications.append(contentsOf: result.notifications)
+
+                // If any page has 50 items, there might be more
+                if result.notifications.count == 50 {
+                    continuesFetching = true
+                }
+            }
+
+            // Check if we should continue
+            if !continuesFetching {
+                break
+            }
+
+            currentPage += self.maxParallelPages
 
             // Safety limit
-            if page > 10 {
-                DiagnosticsLogger.warning("Reached page limit, stopping pagination", category: .api)
+            if currentPage > 20 {
+                DiagnosticsLogger.warning("Reached page limit (20), stopping pagination", category: .api)
+                break
+            }
+        }
+
+        return allNotifications
+    }
+
+    /// Fetches remaining pages progressively, calling the handler after each batch.
+    private func fetchRemainingPagesProgressively(
+        all: Bool,
+        participating: Bool,
+        startPage: Int,
+        existingNotifications: [GitHubNotification],
+        onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification] {
+        var allNotifications = existingNotifications
+        var currentPage = startPage
+
+        while true {
+            // Fetch up to maxParallelPages concurrently
+            let pagesToFetch = currentPage...(currentPage + self.maxParallelPages - 1)
+
+            let results = try await withThrowingTaskGroup(
+                of: (page: Int, notifications: [GitHubNotification]).self) { group in
+                    for page in pagesToFetch {
+                        group.addTask {
+                            let notifications = try await self.fetchNotifications(
+                                all: all,
+                                participating: participating,
+                                page: page)
+                            return (page: page, notifications: notifications)
+                        }
+                    }
+
+                    var pageResults: [(page: Int, notifications: [GitHubNotification])] = []
+                    for try await result in group {
+                        pageResults.append(result)
+                    }
+                    return pageResults.sorted { $0.page < $1.page }
+                }
+
+            // Process results in page order
+            var continuesFetching = false
+            for result in results {
+                allNotifications.append(contentsOf: result.notifications)
+
+                // If any page has 50 items, there might be more
+                if result.notifications.count == 50 {
+                    continuesFetching = true
+                }
+            }
+
+            // Update UI after each batch of parallel fetches
+            onBatchReceived(allNotifications)
+
+            // Check if we should continue
+            if !continuesFetching {
+                break
+            }
+
+            currentPage += self.maxParallelPages
+
+            // Safety limit
+            if currentPage > 20 {
+                DiagnosticsLogger.warning("Reached page limit (20), stopping pagination", category: .api)
                 break
             }
         }

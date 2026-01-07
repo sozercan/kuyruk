@@ -1,5 +1,8 @@
 import Foundation
 
+/// Callback for progressive notification updates.
+typealias NotificationUpdateHandler = @MainActor @Sendable ([GitHubNotification]) -> Void
+
 /// Background sync service for fetching notifications from GitHub.
 @MainActor
 @Observable
@@ -18,6 +21,9 @@ final class SyncService {
     /// Count of new notifications since last check
     private(set) var newNotificationCount: Int = 0
 
+    /// Whether data was modified in last sync
+    private(set) var lastSyncHadChanges: Bool = false
+
     /// Sync interval in seconds (configurable)
     var syncInterval: TimeInterval {
         TimeInterval(UserDefaults.standard.integer(forKey: "syncInterval").clamped(to: 30...900))
@@ -28,6 +34,9 @@ final class SyncService {
     private let notificationService: NotificationService?
     private var syncTask: Task<Void, Never>?
     private var previousNotificationIds: Set<String> = []
+
+    /// Optional callback for progressive updates
+    var onNotificationsUpdated: NotificationUpdateHandler?
 
     // MARK: - Initialization
 
@@ -95,14 +104,25 @@ final class SyncService {
         self.isSyncing = true
         self.lastError = nil
         self.newNotificationCount = 0
+        self.lastSyncHadChanges = false
 
         DiagnosticsLogger.info("Starting sync (initial: \(isInitialSync))", category: .sync)
 
         do {
-            // Fetch all notifications from GitHub
-            let notifications = try await gitHubClient.fetchAllNotifications()
+            // Use conditional fetch - returns nil if unchanged
+            guard let notifications = try await gitHubClient.fetchAllNotifications() else {
+                // 304 Not Modified - no changes
+                DiagnosticsLogger.info("No changes since last sync (304)", category: .sync)
+                self.lastSyncedAt = Date()
+                self.isSyncing = false
+                return
+            }
 
+            self.lastSyncHadChanges = true
             DiagnosticsLogger.info("Fetched \(notifications.count) notifications from API", category: .sync)
+
+            // Notify listeners of new data
+            self.onNotificationsUpdated?(notifications)
 
             // Detect new notifications
             let currentIds = Set(notifications.map(\.id))
@@ -146,9 +166,32 @@ final class SyncService {
         self.isSyncing = false
     }
 
-    /// Forces an immediate sync.
+    /// Forces an immediate sync, bypassing conditional caching.
     func forceSync() async {
-        await self.sync(isInitialSync: false)
+        guard !self.isSyncing else { return }
+
+        self.isSyncing = true
+        self.lastError = nil
+
+        do {
+            let notifications = try await gitHubClient.fetchAllNotificationsForced()
+            self.lastSyncHadChanges = true
+
+            // Notify listeners
+            self.onNotificationsUpdated?(notifications)
+
+            // Save to cache
+            try self.dataStore.saveNotifications(notifications)
+
+            let repositories = Array(Set(notifications.map(\.repository)))
+            try self.dataStore.saveRepositories(repositories)
+
+            self.lastSyncedAt = Date()
+        } catch {
+            self.lastError = error
+        }
+
+        self.isSyncing = false
     }
 
     /// Clears the sync error.

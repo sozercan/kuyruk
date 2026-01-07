@@ -14,6 +14,7 @@ enum DiagnosticsLogger {
     private static let syncLog = Logger(subsystem: subsystem, category: "sync")
     private static let uiLog = Logger(subsystem: subsystem, category: "ui")
     private static let dataLog = Logger(subsystem: subsystem, category: "data")
+    private static let networkLog = Logger(subsystem: subsystem, category: "network")
 
     // MARK: - Log Levels
 
@@ -66,6 +67,8 @@ enum DiagnosticsLogger {
             self.uiLog
         case .data:
             self.dataLog
+        case .network:
+            self.networkLog
         }
     }
 }
@@ -81,5 +84,6 @@ extension DiagnosticsLogger {
         case sync
         case ui
         case data
+        case network
     }
 }

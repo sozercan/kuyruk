@@ -1,9 +1,13 @@
+import AppKit
 import SwiftUI
 
-/// Displays a user or organization avatar with caching.
+/// Displays a user or organization avatar with persistent caching.
 struct AvatarView: View {
     let url: String
     let size: CGFloat
+
+    @State private var image: NSImage?
+    @State private var isLoading = true
 
     init(url: String, size: CGFloat = 32) {
         self.url = url
@@ -11,40 +15,43 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        AsyncImage(url: URL(string: self.url)) { phase in
-            switch phase {
-            case .empty:
+        Group {
+            if let image = self.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if self.isLoading {
                 self.placeholder
                     .overlay {
                         ProgressView()
                             .controlSize(.small)
                     }
-
-            case let .success(image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-
-            case .failure:
+            } else {
                 self.placeholder
                     .overlay {
                         Image(systemName: "person.fill")
                             .font(.system(size: self.size * 0.5))
                             .foregroundStyle(.secondary)
                     }
-
-            @unknown default:
-                self.placeholder
             }
         }
         .frame(width: self.size, height: self.size)
         .clipShape(Circle())
+        .task(id: self.url) {
+            await self.loadImage()
+        }
     }
 
     private var placeholder: some View {
         Circle()
             .fill(.quaternary)
             .frame(width: self.size, height: self.size)
+    }
+
+    private func loadImage() async {
+        self.isLoading = true
+        self.image = await ImageCache.shared.image(for: self.url)
+        self.isLoading = false
     }
 }
 
