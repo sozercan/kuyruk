@@ -54,6 +54,7 @@ struct KuyrukApp: App {
                 .environment(self.authService)
                 .environment(self.gitHubClient)
                 .environment(self.notificationService)
+                .environment(self.syncService)
                 .environment(self.viewModel)
                 .modelContainer(self.dataStore.container)
                 .task {
@@ -68,6 +69,7 @@ struct KuyrukApp: App {
                 }
                 .onChange(of: self.viewModel.unreadCount) { _, newCount in
                     self.appDelegate.updateBadge(count: newCount)
+                    self.appDelegate.notificationsDidUpdate()
                 }
         }
         .windowStyle(.automatic)
@@ -80,6 +82,12 @@ struct KuyrukApp: App {
             SettingsView()
                 .environment(self.authService)
                 .environment(self.notificationService)
+                .onChange(of: UserDefaults.standard.bool(forKey: "showInMenuBar")) { _, _ in
+                    self.appDelegate.updateMenuBarVisibility()
+                }
+                .onChange(of: UserDefaults.standard.bool(forKey: "showInDock")) { _, _ in
+                    self.appDelegate.updateActivationPolicy()
+                }
         }
     }
 

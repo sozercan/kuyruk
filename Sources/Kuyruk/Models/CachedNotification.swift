@@ -56,6 +56,17 @@ final class CachedNotification {
     /// Whether this notification has been deleted on GitHub
     var isDeleted: Bool
 
+    // MARK: - Snooze Support
+
+    /// When the notification is snoozed until (nil = not snoozed)
+    var snoozedUntil: Date?
+
+    /// Whether the notification is currently snoozed
+    var isSnoozed: Bool {
+        guard let snoozedUntil else { return false }
+        return snoozedUntil > Date()
+    }
+
     init(
         id: String,
         title: String,
@@ -72,7 +83,8 @@ final class CachedNotification {
         webUrl: String?,
         subjectUrl: String?,
         lastSyncedAt: Date = Date(),
-        isDeleted: Bool = false) {
+        isDeleted: Bool = false,
+        snoozedUntil: Date? = nil) {
         self.id = id
         self.title = title
         self.repositoryFullName = repositoryFullName
@@ -89,6 +101,7 @@ final class CachedNotification {
         self.subjectUrl = subjectUrl
         self.lastSyncedAt = lastSyncedAt
         self.isDeleted = isDeleted
+        self.snoozedUntil = snoozedUntil
     }
 }
 

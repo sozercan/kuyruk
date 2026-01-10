@@ -3,6 +3,7 @@ import SwiftUI
 /// Sidebar view with smart filters and repository list.
 struct SidebarView: View {
     @Environment(NotificationsViewModel.self) private var viewModel
+    @Environment(SyncService.self) private var syncService
 
     private let filterGridColumns = [
         GridItem(.flexible(), spacing: 8),
@@ -15,6 +16,9 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             self.filterCardsGrid
             self.repositoriesList(selection: $vm.selectedFilter)
+
+            // Sync status at bottom
+            SyncStatusBar()
         }
         .navigationTitle("Kuyruk")
         .frame(minWidth: 220)

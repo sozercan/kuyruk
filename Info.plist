@@ -11,7 +11,7 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.sozercan.Kuyruk</string>
+    <string>com.sertacozercan.Kuyruk</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -38,7 +38,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.sozercan.Kuyruk.oauth</string>
+            <string>com.sertacozercan.Kuyruk.oauth</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>kuyruk</string>

@@ -81,12 +81,13 @@ struct KuyrukTests {
         #expect(NotificationFilter.unread.matches(unreadNotification))
     }
 
-    @Test("Inbox filter includes all notifications")
-    func inboxFilterIncludesAll() {
+    @Test("Inbox filter matches only unread notifications (like GitHub default)")
+    func inboxFilterMatchesUnread() {
         let readNotification = KuyrukTests.makeNotification(unread: false)
         let unreadNotification = KuyrukTests.makeNotification(unread: true)
 
-        #expect(NotificationFilter.inbox.matches(readNotification))
+        // Inbox shows only unread notifications, matching GitHub's default view
+        #expect(!NotificationFilter.inbox.matches(readNotification))
         #expect(NotificationFilter.inbox.matches(unreadNotification))
     }
 

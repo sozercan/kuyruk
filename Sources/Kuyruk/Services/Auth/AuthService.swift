@@ -3,8 +3,32 @@ import Foundation
 // MARK: - OAuthConfig
 
 /// OAuth 2.0 configuration for GitHub Device Flow
+///
+/// ## Scope Audit (P0 Security Review)
+///
+/// **Current Scopes:**
+/// - `notifications` — Required. Read/write access to notifications (mark as read, list, etc.)
+/// - `read:user` — Required. Read access to user profile (avatar, login name for UI).
+///
+/// **Scopes NOT Required:**
+/// - `repo` — NOT needed. The `notifications` scope grants read access to notification
+///   metadata including private repo names. We don't need to read repo contents.
+/// - `write:repo_hook` — NOT needed. We don't create webhooks.
+/// - `admin:org` — NOT needed. We don't manage organizations.
+///
+/// **Security Notes:**
+/// - These are the minimum scopes required for the app's functionality.
+/// - The `notifications` scope is read/write to support "mark as read" functionality.
+/// - Private repository notification titles ARE visible with just `notifications` scope.
+/// - If users want to hide private repo notifications, we should add a future setting.
+///
+/// Last audited: January 2026
 enum OAuthConfig {
     static let clientId = "Ov23li3MPDZBIQpusS18"
+
+    /// Minimum required scopes for Kuyruk functionality.
+    /// - `notifications`: List and mark notifications as read
+    /// - `read:user`: Display user profile in settings
     static let scope = "notifications read:user"
 
     static let deviceCodeUrl = "https://github.com/login/device/code"

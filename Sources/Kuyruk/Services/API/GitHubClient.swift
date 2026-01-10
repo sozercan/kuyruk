@@ -172,7 +172,7 @@ final class GitHubClient {
 
     /// Whether we have persisted conditional headers for 304 optimization
     var hasConditionalHeaders: Bool {
-        notificationsETag != nil || notificationsLastModified != nil
+        self.notificationsETag != nil || self.notificationsLastModified != nil
     }
 
     /// Time remaining until cache expires (for UI display)
@@ -185,9 +185,28 @@ final class GitHubClient {
 
     // MARK: - Initialization
 
-    init(authService: AuthService, session: URLSession = .shared) {
+    /// Creates a GitHubClient with certificate pinning enabled by default.
+    /// - Parameters:
+    ///   - authService: Authentication service for token management
+    ///   - session: URLSession to use (defaults to pinned session)
+    ///   - enablePinning: Whether to enable certificate pinning (default: true in release)
+    init(authService: AuthService, session: URLSession? = nil, enablePinning: Bool = true) {
         self.authService = authService
-        self.session = session
+
+        // Use pinned session by default for security
+        #if DEBUG
+        // In debug builds, allow disabling pinning for testing
+        if let customSession = session {
+            self.session = customSession
+        } else if enablePinning {
+            self.session = URLSession.createPinnedSession(enforcePinning: false)
+        } else {
+            self.session = .shared
+        }
+        #else
+        // In release builds, always use pinned session
+        self.session = session ?? URLSession.createPinnedSession(enforcePinning: true)
+        #endif
 
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
@@ -511,14 +530,33 @@ final class GitHubClient {
         let endpoint = GitHubEndpoint.markThreadAsRead(threadId: threadId)
         let request = try self.buildRequest(for: endpoint)
 
-        let (_, response) = try await self.session.data(for: request)
+        DiagnosticsLogger.info("Request: PATCH /notifications/threads/\(threadId)", category: .api)
+
+        let (data, response) = try await self.session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw GitHubError.invalidResponse
         }
 
+        // Log the response for debugging
+        DiagnosticsLogger.info(
+            "Mark as read response: HTTP \(httpResponse.statusCode)",
+            category: .api)
+
+        if !data.isEmpty, let responseBody = String(data: data, encoding: .utf8) {
+            DiagnosticsLogger.debug("Response body: \(responseBody)", category: .api)
+        }
+
+        self.updateRateLimitInfo(from: httpResponse)
         try self.handleResponseStatus(httpResponse)
-        DiagnosticsLogger.info("Marked thread \(threadId) as read", category: .api)
+
+        // Invalidate conditional request cache to ensure next fetch gets fresh data
+        // GitHub's notifications list will change after marking as read
+        self.notificationsETag = nil
+        self.notificationsLastModified = nil
+        DiagnosticsLogger.debug("Cleared conditional headers after markAsRead", category: .api)
+
+        DiagnosticsLogger.info("Successfully marked thread \(threadId) as read", category: .api)
     }
 
     /// Fetches the authenticated user's information.

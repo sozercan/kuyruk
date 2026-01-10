@@ -14,7 +14,7 @@ struct NotificationDetailView: View {
             }
         }
         .frame(minWidth: 300)
-        .animation(.easeInOut(duration: 0.15), value: viewModel.selectedNotification?.id)
+        .animation(.easeInOut(duration: 0.15), value: self.viewModel.selectedNotification?.id)
     }
 
     // MARK: - Empty State

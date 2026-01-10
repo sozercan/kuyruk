@@ -95,6 +95,18 @@ extension GitHubNotification {
         // Convert API URL to web URL
         // API: https://api.github.com/repos/owner/repo/issues/123
         // Web: https://github.com/owner/repo/issues/123
+
+        // For releases, the API URL uses the release ID but the web URL needs the tag name
+        // API: https://api.github.com/repos/owner/repo/releases/270883206
+        // Web: https://github.com/owner/repo/releases/tag/v0.26.3
+        // The tag name is the subject title for releases
+        if self.subject.type == .release {
+            // URL-encode the tag name to handle special characters
+            let tagName = self.subject.title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+                ?? self.subject.title
+            return URL(string: "https://github.com/\(self.repository.fullName)/releases/tag/\(tagName)")
+        }
+
         guard let apiUrl = subject.url else { return nil }
 
         let webUrlString = apiUrl

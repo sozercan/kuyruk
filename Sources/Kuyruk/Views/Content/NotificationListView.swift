@@ -10,6 +10,8 @@ struct NotificationListView: View {
         Group {
             if self.viewModel.isLoading, self.viewModel.notifications.isEmpty {
                 self.loadingState
+            } else if self.viewModel.error != nil, self.viewModel.notifications.isEmpty {
+                self.errorState
             } else if self.viewModel.groupedNotifications.isEmpty {
                 self.emptyState
             } else {
@@ -38,15 +40,56 @@ struct NotificationListView: View {
     @ViewBuilder
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("No Notifications", systemImage: "bell.slash")
+            Label(self.viewModel.selectedFilter.emptyStateTitle, systemImage: self.emptyStateIcon)
         } description: {
             if self.viewModel.searchText.isEmpty {
-                Text("You're all caught up!")
+                Text(self.viewModel.selectedFilter.emptyStateDescription)
             } else {
                 Text("No notifications match '\(self.viewModel.searchText)'")
             }
         } actions: {
             Button("Refresh") {
+                Task {
+                    await self.viewModel.refresh()
+                }
+            }
+        }
+    }
+
+    /// Icon for the empty state based on current filter
+    private var emptyStateIcon: String {
+        switch self.viewModel.selectedFilter {
+        case .inbox,
+             .unread:
+            "bell.slash"
+        case .participating:
+            "person.2.slash"
+        case .mentioned:
+            "at.badge.minus"
+        case .assigned:
+            "person.badge.minus"
+        case .reviewRequested:
+            "eye.slash"
+        case .snoozed:
+            "moon.zzz"
+        case .repository:
+            "folder.badge.minus"
+        }
+    }
+
+    @ViewBuilder
+    private var errorState: some View {
+        ContentUnavailableView {
+            Label("Something Went Wrong", systemImage: "exclamationmark.triangle")
+        } description: {
+            if let error = self.viewModel.error {
+                Text(error.localizedDescription)
+            } else {
+                Text("An unexpected error occurred.")
+            }
+        } actions: {
+            Button("Try Again") {
+                self.viewModel.clearError()
                 Task {
                     await self.viewModel.refresh()
                 }

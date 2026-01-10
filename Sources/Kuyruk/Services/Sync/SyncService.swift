@@ -173,6 +173,8 @@ final class SyncService {
         self.isSyncing = true
         self.lastError = nil
 
+        DiagnosticsLogger.info("Starting force sync", category: .sync)
+
         do {
             let notifications = try await gitHubClient.fetchAllNotificationsForced()
             self.lastSyncHadChanges = true
@@ -187,8 +189,10 @@ final class SyncService {
             try self.dataStore.saveRepositories(repositories)
 
             self.lastSyncedAt = Date()
+            DiagnosticsLogger.info("Force sync completed successfully", category: .sync)
         } catch {
             self.lastError = error
+            DiagnosticsLogger.error(error, context: "forceSync", category: .sync)
         }
 
         self.isSyncing = false

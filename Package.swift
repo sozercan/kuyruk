@@ -23,6 +23,9 @@ let package = Package(
         // Main app executable
         .executableTarget(
             name: "Kuyruk",
+            resources: [
+                .process("Resources"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .enableExperimentalFeature("StrictConcurrency"),

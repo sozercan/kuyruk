@@ -104,8 +104,11 @@ final class NotificationsViewModel {
                 self.notifications = cached.compactMap { self.convertCachedNotification($0) }
                 self.repositories = self.extractRepositories(from: self.notifications)
 
+                // Log read/unread counts for debugging
+                let readCount = self.notifications.count(where: { !$0.unread })
+                let unreadCount = self.notifications.filter(\.unread).count
                 DiagnosticsLogger.info(
-                    "Loaded \(self.notifications.count) notifications from cache",
+                    "Loaded \(self.notifications.count) notifications from cache (\(readCount) read, \(unreadCount) unread)",
                     category: .ui)
 
                 // Prefetch avatars for visible items
@@ -115,6 +118,7 @@ final class NotificationsViewModel {
                 self.refreshInBackground()
             } else {
                 // No cache - must wait for network
+                DiagnosticsLogger.info("No cached notifications, fetching from network", category: .ui)
                 await self.refresh()
             }
         } catch {
@@ -207,6 +211,7 @@ final class NotificationsViewModel {
     }
 
     /// Marks a notification as read.
+    /// Uses optimistic update with rollback on failure for critical errors.
     func markAsRead(_ notification: GitHubNotification) async {
         DiagnosticsLogger.info("Marking notification \(notification.id) as read", category: .ui)
 
@@ -215,6 +220,10 @@ final class NotificationsViewModel {
             DiagnosticsLogger.warning("Notification \(notification.id) not found in list", category: .ui)
             return
         }
+
+        // Store original state for potential rollback
+        let originalNotification = notification
+        let wasSelected = self.selectedNotification?.id == notification.id
 
         // Optimistic update: Update local state immediately for responsive UI
         let updated = GitHubNotification(
@@ -230,7 +239,7 @@ final class NotificationsViewModel {
         self.notifications[index] = updated
 
         // Update selected notification if needed
-        if self.selectedNotification?.id == notification.id {
+        if wasSelected {
             self.selectedNotification = updated
         }
 
@@ -246,19 +255,122 @@ final class NotificationsViewModel {
             DiagnosticsLogger.info(
                 "Successfully marked notification \(notification.id) as read on server",
                 category: .ui)
-        } catch {
-            // API call failed, but we keep the local state updated for better UX
-            // The next sync will reconcile if needed
-            DiagnosticsLogger.error(error, context: "markAsRead API call", category: .ui)
+        } catch let error as GitHubError {
+            // Rollback on critical errors (unauthorized, not found)
+            switch error {
+            case .unauthorized,
+                 .notFound:
+                DiagnosticsLogger.warning(
+                    "Rolling back markAsRead due to critical error: \(error)",
+                    category: .ui)
+                self.rollbackMarkAsRead(
+                    originalNotification: originalNotification,
+                    atIndex: index,
+                    wasSelected: wasSelected)
+                self.error = error
 
-            // For unauthorized errors, we might want to revert, but for now keep optimistic
-            // since the user intended to mark it as read
+            case .rateLimited,
+                 .networkError,
+                 .serverError:
+                // Keep optimistic update for transient errors
+                // These will be reconciled on next sync
+                DiagnosticsLogger.warning(
+                    "Keeping optimistic update despite transient error: \(error)",
+                    category: .ui)
+
+            default:
+                DiagnosticsLogger.error(error, context: "markAsRead API call", category: .ui)
+            }
+        } catch {
+            // For unknown errors, log but keep optimistic update
+            DiagnosticsLogger.error(error, context: "markAsRead API call", category: .ui)
         }
+    }
+
+    /// Rolls back an optimistic markAsRead update.
+    private func rollbackMarkAsRead(
+        originalNotification: GitHubNotification,
+        atIndex index: Int,
+        wasSelected: Bool) {
+        // Verify index is still valid
+        guard index < self.notifications.count,
+              self.notifications[index].id == originalNotification.id
+        else {
+            DiagnosticsLogger.warning(
+                "Cannot rollback: notification moved or removed",
+                category: .ui)
+            return
+        }
+
+        // Restore original state
+        self.notifications[index] = originalNotification
+
+        if wasSelected {
+            self.selectedNotification = originalNotification
+        }
+
+        // Restore in API client cache
+        self.gitHubClient.updateCachedNotification(originalNotification)
+
+        // Restore in persistence cache
+        try? self.dataStore.markAsUnread(notificationId: originalNotification.id)
+
+        DiagnosticsLogger.info(
+            "Rolled back markAsRead for notification \(originalNotification.id)",
+            category: .ui)
     }
 
     /// Clears the current error.
     func clearError() {
         self.error = nil
+    }
+
+    // MARK: - Snooze Operations
+
+    /// Snoozes a notification until the specified date.
+    func snoozeNotification(_ notification: GitHubNotification, until date: Date) {
+        DiagnosticsLogger.info("Snoozing notification \(notification.id) until \(date)", category: .ui)
+
+        do {
+            try self.dataStore.snoozeNotification(id: notification.id, until: date)
+            // Trigger UI update
+            self.updateGroupedNotifications()
+        } catch {
+            DiagnosticsLogger.error(error, context: "snoozeNotification", category: .ui)
+            self.error = error
+        }
+    }
+
+    /// Unsnoozes a notification.
+    func unsnoozeNotification(_ notification: GitHubNotification) {
+        DiagnosticsLogger.info("Unsnoozing notification \(notification.id)", category: .ui)
+
+        do {
+            try self.dataStore.unsnoozeNotification(id: notification.id)
+            // Trigger UI update
+            self.updateGroupedNotifications()
+        } catch {
+            DiagnosticsLogger.error(error, context: "unsnoozeNotification", category: .ui)
+            self.error = error
+        }
+    }
+
+    /// Gets the count of snoozed notifications.
+    var snoozedCount: Int {
+        (try? self.dataStore.snoozedCount()) ?? 0
+    }
+
+    /// Checks for expired snoozes and unsnoozes them.
+    /// Call this periodically (e.g., every minute) to wake up snoozed notifications.
+    func checkExpiredSnoozes() {
+        do {
+            let count = try self.dataStore.unsnoozeExpiredNotifications()
+            if count > 0 {
+                self.updateGroupedNotifications()
+            }
+        } catch {
+            DiagnosticsLogger.error(error, context: "checkExpiredSnoozes", category: .ui)
+        }
     }
 
     // MARK: - Private Methods
@@ -289,6 +401,10 @@ final class NotificationsViewModel {
 
     /// Merges fresh notifications with existing data efficiently.
     private func mergeNotifications(_ fresh: [GitHubNotification]) {
+        DiagnosticsLogger.debug(
+            "Merging \(fresh.count) fresh notifications with \(self.notifications.count) existing",
+            category: .ui)
+
         // Build index of existing notifications for fast lookup
         var existingById: [String: GitHubNotification] = [:]
         for notification in self.notifications {
@@ -298,6 +414,7 @@ final class NotificationsViewModel {
         // Merge fresh data, preserving local "read" state
         var merged: [GitHubNotification] = []
         var seenIds: Set<String> = []
+        var preservedReadCount = 0
 
         for notification in fresh {
             // Check if we have a local version that was marked as read
@@ -307,6 +424,10 @@ final class NotificationsViewModel {
                 // This handles the race condition where we marked as read locally
                 // but the API hasn't caught up yet
                 merged.append(existing)
+                preservedReadCount += 1
+                DiagnosticsLogger.debug(
+                    "Preserved local read state for notification \(notification.id)",
+                    category: .ui)
             } else {
                 merged.append(notification)
             }
@@ -315,12 +436,18 @@ final class NotificationsViewModel {
 
         // Keep notifications that might still be relevant but weren't in this fetch
         // (e.g., read notifications when fetching unread only)
+        var keptReadCount = 0
         for notification in self.notifications where !seenIds.contains(notification.id) {
             // Only keep if it's read (might have been marked read locally)
             if !notification.unread {
                 merged.append(notification)
+                keptReadCount += 1
             }
         }
+
+        DiagnosticsLogger.debug(
+            "Merge result: \(merged.count) total, \(preservedReadCount) preserved read, \(keptReadCount) kept read",
+            category: .ui)
 
         self.notifications = merged
         self.repositories = self.extractRepositories(from: merged)

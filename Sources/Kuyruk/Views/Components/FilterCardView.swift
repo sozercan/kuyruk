@@ -74,6 +74,8 @@ extension NotificationFilter {
             Color(red: 0.70, green: 0.45, blue: 0.85) // Purple
         case .reviewRequested:
             Color(red: 0.90, green: 0.45, blue: 0.50) // Coral/Red like "Scheduled"
+        case .snoozed:
+            Color(red: 0.95, green: 0.70, blue: 0.30) // Warm orange/amber for snoozed
         case .repository:
             Color(red: 0.35, green: 0.65, blue: 0.80) // Cyan
         }

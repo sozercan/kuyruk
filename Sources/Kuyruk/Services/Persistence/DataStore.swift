@@ -134,7 +134,96 @@ final class DataStore {
             notification.unread = false
             notification.lastSyncedAt = Date()
             try self.modelContext.save()
+            DiagnosticsLogger.debug("Marked notification \(notificationId) as read in cache", category: .data)
+        } else {
+            DiagnosticsLogger.warning(
+                "Notification \(notificationId) not found in cache for markAsRead",
+                category: .data)
         }
+    }
+
+    /// Marks a notification as unread in the cache (used for rollback).
+    func markAsUnread(notificationId: String) throws {
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.id == notificationId })
+
+        if let notification = try modelContext.fetch(descriptor).first {
+            notification.unread = true
+            notification.lastReadAt = nil
+            notification.lastSyncedAt = Date()
+            try self.modelContext.save()
+            DiagnosticsLogger.debug("Marked notification \(notificationId) as unread in cache", category: .data)
+        }
+    }
+
+    // MARK: - Snooze Operations
+
+    /// Snoozes a notification until the specified date.
+    func snoozeNotification(id: String, until date: Date) throws {
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.id == id })
+
+        if let notification = try modelContext.fetch(descriptor).first {
+            notification.snoozedUntil = date
+            notification.lastSyncedAt = Date()
+            try self.modelContext.save()
+            DiagnosticsLogger.info("Snoozed notification \(id) until \(date)", category: .data)
+        }
+    }
+
+    /// Unsnoozes a notification.
+    func unsnoozeNotification(id: String) throws {
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.id == id })
+
+        if let notification = try modelContext.fetch(descriptor).first {
+            notification.snoozedUntil = nil
+            notification.lastSyncedAt = Date()
+            try self.modelContext.save()
+            DiagnosticsLogger.info("Unsnoozed notification \(id)", category: .data)
+        }
+    }
+
+    /// Fetches all currently snoozed notifications.
+    func fetchSnoozedNotifications() throws -> [CachedNotification] {
+        let now = Date()
+        // swiftlint:disable:next force_unwrapping
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted },
+            sortBy: [SortDescriptor(\.snoozedUntil)])
+
+        return try self.modelContext.fetch(descriptor)
+    }
+
+    /// Gets the count of snoozed notifications.
+    func snoozedCount() throws -> Int {
+        let now = Date()
+        // swiftlint:disable:next force_unwrapping
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted })
+
+        return try self.modelContext.fetchCount(descriptor)
+    }
+
+    /// Unsnoozes expired notifications (snooze time has passed).
+    func unsnoozeExpiredNotifications() throws -> Int {
+        let now = Date()
+        // swiftlint:disable:next force_unwrapping
+        let descriptor = FetchDescriptor<CachedNotification>(
+            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! <= now && !$0.isDeleted })
+
+        let expired = try self.modelContext.fetch(descriptor)
+
+        for notification in expired {
+            notification.snoozedUntil = nil
+        }
+
+        if !expired.isEmpty {
+            try self.modelContext.save()
+            DiagnosticsLogger.info("Unsnoozed \(expired.count) expired notifications", category: .data)
+        }
+
+        return expired.count
     }
 
     /// Gets the count of unread notifications.

@@ -2,7 +2,10 @@ import SwiftUI
 
 /// Individual notification row in the list.
 struct NotificationRowView: View {
+    @Environment(NotificationsViewModel.self) private var viewModel
+
     let notification: GitHubNotification
+    var snoozedUntil: Date?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -34,6 +37,11 @@ struct NotificationRowView: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+
+                    // Snoozed badge if applicable
+                    if let snoozedUntil {
+                        SnoozedBadge(snoozedUntil: snoozedUntil)
+                    }
                 }
 
                 // Reason badge
@@ -44,6 +52,45 @@ struct NotificationRowView: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+        .contextMenu {
+            self.contextMenuContent
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button {
+            Task {
+                await self.viewModel.markAsRead(self.notification)
+            }
+        } label: {
+            Label("Mark as Read", systemImage: "checkmark.circle")
+        }
+        .disabled(!self.notification.unread)
+
+        Divider()
+
+        if self.snoozedUntil != nil {
+            Button {
+                self.viewModel.unsnoozeNotification(self.notification)
+            } label: {
+                Label("Unsnooze", systemImage: "bell")
+            }
+        } else {
+            SnoozeMenu { date in
+                self.viewModel.snoozeNotification(self.notification, until: date)
+            }
+        }
+
+        Divider()
+
+        if let webUrl = notification.webUrl {
+            Button {
+                NSWorkspace.shared.open(webUrl)
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
+            }
+        }
     }
 }
 

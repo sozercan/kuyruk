@@ -4,7 +4,7 @@ import OSLog
 /// Centralized logging utility using OSLog.
 /// Use this instead of `print()` throughout the app.
 enum DiagnosticsLogger {
-    private static let subsystem = "com.kuyruk"
+    private static let subsystem = "com.sertacozercan.Kuyruk"
 
     // MARK: - Log Categories
 
@@ -20,27 +20,27 @@ enum DiagnosticsLogger {
 
     /// General debug information
     static func debug(_ message: String, category: LogCategory = .general) {
-        self.logger(for: category).debug("\(message)")
+        self.logger(for: category).debug("\(message, privacy: .public)")
     }
 
     /// Informational messages
     static func info(_ message: String, category: LogCategory = .general) {
-        self.logger(for: category).info("\(message)")
+        self.logger(for: category).info("\(message, privacy: .public)")
     }
 
     /// Warning messages (potential issues)
     static func warning(_ message: String, category: LogCategory = .general) {
-        self.logger(for: category).warning("\(message)")
+        self.logger(for: category).warning("\(message, privacy: .public)")
     }
 
     /// Error messages (something went wrong)
     static func error(_ message: String, category: LogCategory = .general) {
-        self.logger(for: category).error("\(message)")
+        self.logger(for: category).error("\(message, privacy: .public)")
     }
 
     /// Critical errors (app may not function correctly)
     static func critical(_ message: String, category: LogCategory = .general) {
-        self.logger(for: category).critical("\(message)")
+        self.logger(for: category).critical("\(message, privacy: .public)")
     }
 
     // MARK: - Error Logging
@@ -48,7 +48,8 @@ enum DiagnosticsLogger {
     /// Logs an error with its description
     static func error(_ error: Error, context: String? = nil, category: LogCategory = .general) {
         let contextString = context.map { "[\($0)] " } ?? ""
-        Self.logger(for: category).error("\(contextString)\(error.localizedDescription)")
+        Self.logger(for: category)
+            .error("\(contextString, privacy: .public)\(error.localizedDescription, privacy: .public)")
     }
 
     // MARK: - Private Helpers

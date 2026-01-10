@@ -14,7 +14,7 @@ source "$ROOT/version.env"
 CONF=${1:-release}
 SIGNING_MODE=${KUYRUK_SIGNING:-dev}
 APP_NAME="Kuyruk"
-BUNDLE_ID="com.sozercan.Kuyruk"
+BUNDLE_ID="com.sertacozercan.Kuyruk"
 BUILD_DIR="$ROOT/.build/app"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
@@ -139,7 +139,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.sozercan.Kuyruk.oauth</string>
+            <string>com.sertacozercan.Kuyruk.oauth</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>kuyruk</string>
@@ -160,6 +160,13 @@ PLIST
 
 # Create PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
+
+# Copy app icon (icns file)
+ICON_PATH="$ROOT/Sources/Kuyruk/Resources/AppIcon.icns"
+if [[ -f "$ICON_PATH" ]]; then
+  echo "🎨 Copying app icon..."
+  cp "$ICON_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+fi
 
 # Strip extended attributes to prevent AppleDouble (._*) files that break code sealing
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true

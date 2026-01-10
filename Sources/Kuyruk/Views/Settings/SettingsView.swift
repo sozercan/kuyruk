@@ -101,7 +101,7 @@ struct GeneralSettingsView: View {
 
     private func openNotificationSettings() {
         if let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.notifications?id=com.sozercan.Kuyruk") {
+            string: "x-apple.systempreferences:com.apple.preference.notifications?id=com.sertacozercan.Kuyruk") {
             NSWorkspace.shared.open(url)
         }
     }

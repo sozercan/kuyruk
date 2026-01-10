@@ -8,17 +8,34 @@ struct MainWindow: View {
     // Keyboard navigation state
     @FocusState private var isListFocused: Bool
 
+    // Command palette state
+    @State private var showCommandPalette: Bool = false
+
     var body: some View {
         Group {
-            if self.authService.state.isAuthenticated {
+            switch self.authService.state {
+            case .unknown:
+                // Show loading while checking for existing auth
+                self.checkingAuthContent
+
+            case .authenticated:
                 self.authenticatedContent
-            } else {
+
+            default:
                 self.unauthenticatedContent
             }
         }
         .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             self.isListFocused = true
+        }
+    }
+
+    @ViewBuilder
+    private var checkingAuthContent: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.5)
         }
     }
 
@@ -34,29 +51,18 @@ struct MainWindow: View {
         } detail: {
             NotificationDetailView()
         }
-        .onKeyPress(.downArrow) {
-            self.selectNextNotification()
-            return .handled
+        .modifier(KeyboardNavigationModifier(viewModel: self.viewModel))
+        .sheet(isPresented: self.$showCommandPalette) {
+            CommandPalette()
+                .environment(self.viewModel)
         }
-        .onKeyPress(.upArrow) {
-            self.selectPreviousNotification()
-            return .handled
-        }
-        .onKeyPress("j") {
-            self.selectNextNotification()
-            return .handled
-        }
-        .onKeyPress("k") {
-            self.selectPreviousNotification()
-            return .handled
-        }
-        .onKeyPress("o") {
-            self.openSelectedInBrowser()
-            return .handled
-        }
-        .onKeyPress(.return) {
-            self.openSelectedInBrowser()
-            return .handled
+        .background {
+            // Hidden button to capture ⌘K keyboard shortcut
+            Button("") {
+                self.showCommandPalette = true
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            .hidden()
         }
     }
 
@@ -224,8 +230,45 @@ struct MainWindow: View {
         .foregroundStyle(.secondary)
         .padding(.top, 4)
     }
+}
 
-    // MARK: - Keyboard Navigation
+#Preview {
+    MainWindow()
+}
+
+// MARK: - Keyboard Navigation Modifier
+
+/// Extracted keyboard navigation to simplify type checking
+struct KeyboardNavigationModifier: ViewModifier {
+    let viewModel: NotificationsViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onKeyPress(.downArrow) {
+                self.selectNextNotification()
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                self.selectPreviousNotification()
+                return .handled
+            }
+            .onKeyPress("j") {
+                self.selectNextNotification()
+                return .handled
+            }
+            .onKeyPress("k") {
+                self.selectPreviousNotification()
+                return .handled
+            }
+            .onKeyPress("o") {
+                self.openSelectedInBrowser()
+                return .handled
+            }
+            .onKeyPress(.return) {
+                self.openSelectedInBrowser()
+                return .handled
+            }
+    }
 
     private func selectNextNotification() {
         let notifications = self.viewModel.filteredNotifications
@@ -251,26 +294,10 @@ struct MainWindow: View {
         }
     }
 
-    private func selectFirstNotification() {
-        if let first = viewModel.filteredNotifications.first {
-            self.viewModel.selectedNotification = first
-        }
-    }
-
-    private func selectLastNotification() {
-        if let last = viewModel.filteredNotifications.last {
-            self.viewModel.selectedNotification = last
-        }
-    }
-
     private func openSelectedInBrowser() {
         if let notification = viewModel.selectedNotification,
            let url = notification.webUrl {
             NSWorkspace.shared.open(url)
         }
     }
-}
-
-#Preview {
-    MainWindow()
 }

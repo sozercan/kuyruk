@@ -25,6 +25,18 @@ struct Repository: Codable, Sendable, Identifiable, Hashable {
         case fork
         case url
     }
+
+    // MARK: - Hashable (use only stable identifier)
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(self.id)
+    }
+
+    // MARK: - Equatable (use only stable identifier)
+
+    static func == (lhs: Repository, rhs: Repository) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 /// Owner of a GitHub repository.
@@ -45,5 +57,17 @@ struct RepositoryOwner: Codable, Sendable, Hashable {
         case url
         case htmlUrl = "html_url"
         case type
+    }
+
+    // MARK: - Hashable (use only stable identifier)
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(self.id)
+    }
+
+    // MARK: - Equatable (use only stable identifier)
+
+    static func == (lhs: RepositoryOwner, rhs: RepositoryOwner) -> Bool {
+        lhs.id == rhs.id
     }
 }
