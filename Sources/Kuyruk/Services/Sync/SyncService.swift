@@ -50,7 +50,7 @@ final class SyncService {
 
         // Set default sync interval if not set
         if UserDefaults.standard.integer(forKey: "syncInterval") == 0 {
-            UserDefaults.standard.set(60, forKey: "syncInterval")
+            UserDefaults.standard.set(900, forKey: "syncInterval")
         }
     }
 

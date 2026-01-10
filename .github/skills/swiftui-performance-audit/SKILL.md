@@ -1,6 +1,6 @@
 ---
 name: swiftui-performance-audit
-description: Audit and improve SwiftUI runtime performance from code review and architecture. Use for requests to diagnose slow rendering, janky scrolling, high CPU/memory usage, excessive view updates, or layout thrash in SwiftUI apps.
+description: Audit and improve SwiftUI runtime performance from code review and architecture. Use for requests to diagnose slow rendering, janky scrolling, high CPU/memory usage, excessive view updates, or layout thrash in SwiftUI apps, and to provide guidance for user-run Instruments profiling when code review alone is insufficient.
 ---
 
 # SwiftUI Performance Audit
@@ -43,7 +43,23 @@ Explain how to collect data with Instruments:
 - Capture SwiftUI timeline and Time Profiler.
 - Export or screenshot the relevant lanes and the call tree.
 
-## 3. Remediate
+Ask for:
+- Trace export or screenshots of SwiftUI lanes + Time Profiler call tree.
+- Device/OS/build configuration.
+
+## 3. Analyze and Diagnose
+
+Prioritize likely SwiftUI culprits:
+- View invalidation storms from broad state changes.
+- Unstable identity in lists (`id` churn, `UUID()` per render).
+- Heavy work in `body` (formatting, sorting, image decoding).
+- Layout thrash (deep stacks, `GeometryReader`, preference chains).
+- Large images without downsampling or resizing.
+- Over-animated hierarchies (implicit animations on large trees).
+
+Summarize findings with evidence from traces/logs.
+
+## 4. Remediate
 
 Apply targeted fixes:
 - Narrow state scope (`@State`/`@Observable` closer to leaf views).
@@ -55,46 +71,72 @@ Apply targeted fixes:
 
 ## Common Code Smells (and Fixes)
 
+Look for these patterns during code review.
+
 ### Expensive formatters in `body`
 
 ```swift
-// ❌ Bad: Creates formatter on every render
+// Bad: Creates formatter on every render
 var body: some View {
     let formatter = NumberFormatter()
     Text(formatter.string(from: value))
 }
 
-// ✅ Good: Cached formatter
+// Good: Cached formatter
 static let formatter = NumberFormatter()
 var body: some View {
     Text(Self.formatter.string(from: value))
 }
 ```
 
+### Computed properties that do heavy work
+
+```swift
+// Bad: Runs on every body eval
+var filtered: [Item] {
+    items.filter { $0.isEnabled }
+}
+
+// Good: Precompute or cache on change
+@State private var filtered: [Item] = []
+// update filtered when inputs change
+```
+
 ### Sorting/filtering in `body` or `ForEach`
 
 ```swift
-// ❌ Bad: Sorts on every render
+// Bad: Sorts on every render
 ForEach(items.sorted(by: sortRule)) { item in
     Row(item)
 }
 
-// ✅ Good: Pre-sorted collection
+// Good: Pre-sorted collection
 let sortedItems = items.sorted(by: sortRule)
 ForEach(sortedItems) { item in
     Row(item)
 }
 ```
 
+### Inline filtering in `ForEach`
+
+```swift
+// Bad
+ForEach(items.filter { $0.isEnabled }) { item in
+    Row(item)
+}
+
+// Good: Prefiltered collection with stable identity
+```
+
 ### Unstable identity
 
 ```swift
-// ❌ Bad: Uses \.self for non-stable values
+// Bad: Uses \.self for non-stable values
 ForEach(items, id: \.self) { item in
     Row(item)
 }
 
-// ✅ Good: Uses stable identifier
+// Good: Uses stable identifier
 ForEach(items, id: \.id) { item in
     Row(item)
 }
@@ -103,16 +145,28 @@ ForEach(items, id: \.id) { item in
 ### Image decoding on main thread
 
 ```swift
-// ❌ Bad: Decodes inline
-Image(uiImage: UIImage(data: data)!)
+// Bad: Decodes inline
+Image(nsImage: NSImage(data: data)!)
 
-// ✅ Good: Pre-decoded and cached
-AsyncImage(url: url) { image in
-    image.resizable()
-}
+// Good: Pre-decoded and cached via ImageCache
 ```
 
-## 4. Verify
+### Broad dependencies in observable models
+
+```swift
+// Bad: Entire model observed
+@Observable class Model {
+    var items: [Item] = []
+}
+
+var body: some View {
+    Row(isFavorite: model.items.contains(item))
+}
+
+// Good: Granular view models or per-item state to reduce update fan-out
+```
+
+## 5. Verify
 
 Ask the user to re-run the same capture and compare with baseline metrics.
 Summarize the delta (CPU, frame drops, memory peak) if provided.
@@ -123,3 +177,10 @@ Provide:
 - A short metrics table (before/after if available).
 - Top issues (ordered by impact).
 - Proposed fixes with estimated effort.
+
+## References
+
+- Optimizing SwiftUI performance with Instruments
+- Understanding and improving SwiftUI performance
+- Understanding hangs in your app
+- Demystify SwiftUI performance (WWDC23)

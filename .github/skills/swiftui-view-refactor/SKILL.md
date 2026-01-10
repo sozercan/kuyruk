@@ -10,7 +10,7 @@ Apply a consistent structure and dependency pattern to SwiftUI views, with a foc
 
 ## Core Guidelines
 
-### 1) View ordering (top → bottom)
+### 1) View ordering (top to bottom)
 - Environment
 - `private`/`public` `let`
 - `@State` / other stored properties
@@ -28,7 +28,7 @@ Apply a consistent structure and dependency pattern to SwiftUI views, with a foc
 
 ### 3) Split large bodies and view properties
 - If `body` grows beyond a screen or has multiple logical sections, split it into smaller subviews.
-- Extract large computed view properties into dedicated `View` types when they carry state or complex branching.
+- Extract large computed view properties (`var header: some View { ... }`) into dedicated `View` types when they carry state or complex branching.
 - It's fine to keep related subviews as computed view properties in the same file; extract to a standalone `View` struct only when it structurally makes sense or when reuse is intended.
 - Prefer passing small inputs (data, bindings, callbacks) over reusing the entire parent view state.
 
@@ -40,6 +40,37 @@ var body: some View {
         HeaderSection(title: title, isPinned: isPinned)
         DetailsSection(details: details)
         ActionsSection(onSave: onSave, onCancel: onCancel)
+    }
+}
+```
+
+Example (long body with computed views in the same file):
+
+```swift
+var body: some View {
+    List {
+        header
+        filters
+        results
+        footer
+    }
+}
+
+private var header: some View {
+    VStack(alignment: .leading, spacing: 6) {
+        Text(title).font(.title2)
+        Text(subtitle).font(.subheadline)
+    }
+}
+
+private var filters: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+        HStack {
+            ForEach(filterOptions, id: \.self) { option in
+                FilterChip(option: option, isSelected: option == selectedFilter)
+                    .onTapGesture { selectedFilter = option }
+            }
+        }
     }
 }
 ```
@@ -76,3 +107,7 @@ init(dependency: Dependency) {
 
 - Prefer small, explicit helpers over large conditional blocks.
 - Keep computed view builders below `body` and non-view computed vars above `init`.
+
+## Large-view handling
+
+- When a SwiftUI view file exceeds ~300 lines, split it using extensions to group related helpers. Move async functions and helper functions into dedicated `private` extensions, separated with `// MARK: -` comments that describe their purpose (e.g., `// MARK: - Actions`, `// MARK: - Subviews`, `// MARK: - Helpers`). Keep the main `struct` focused on stored properties, init, and `body`, with view-building computed vars also grouped via marks when the file is long.

@@ -26,7 +26,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @Environment(NotificationService.self) private var notificationService
 
-    @AppStorage("syncInterval") private var syncInterval: Int = 60
+    @AppStorage("syncInterval") private var syncInterval: Int = 900
     @AppStorage("showInMenuBar") private var showInMenuBar: Bool = true
     @AppStorage("showInDock") private var showInDock: Bool = true
     @AppStorage("notificationsEnabled") private var notificationsEnabled: Bool = true
