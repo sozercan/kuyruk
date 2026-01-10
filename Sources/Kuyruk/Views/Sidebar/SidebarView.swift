@@ -102,5 +102,7 @@ struct SidebarView: View {
 }
 
 #Preview {
-    SidebarView()
+    // Preview requires mock services - shown as placeholder
+    Text("SidebarView Preview - requires NotificationsViewModel and SyncService environments")
+        .frame(width: 250, height: 400)
 }

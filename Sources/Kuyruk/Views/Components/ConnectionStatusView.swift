@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Shared formatter for relative time display (expensive to create)
+/// Isolated to MainActor since these views are UI-only
+@MainActor
+private let sharedRelativeFormatter: RelativeDateTimeFormatter = {
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter
+}()
+
 /// Connection status indicator showing online/offline state and last sync time
 struct ConnectionStatusView: View {
     @Environment(NotificationsViewModel.self) private var viewModel
@@ -22,8 +31,8 @@ struct ConnectionStatusView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(.regularMaterial, in: Capsule())
-        .onAppear {
-            self.startMonitoringNetwork()
+        .task {
+            await self.monitorNetwork()
         }
     }
 
@@ -64,18 +73,13 @@ struct ConnectionStatusView: View {
     }
 
     private func formatRelativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        sharedRelativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func startMonitoringNetwork() {
-        // Simple network check using URLSession
-        Task {
-            while !Task.isCancelled {
-                await self.checkConnectivity()
-                try? await Task.sleep(for: .seconds(10))
-            }
+    private func monitorNetwork() async {
+        while !Task.isCancelled {
+            await self.checkConnectivity()
+            try? await Task.sleep(for: .seconds(10))
         }
     }
 
@@ -151,8 +155,8 @@ struct SyncStatusBar: View {
                 self.handleRetryTap()
             }
         }
-        .onAppear {
-            self.startMonitoringNetwork()
+        .task {
+            await self.monitorNetwork()
         }
     }
 
@@ -211,17 +215,13 @@ struct SyncStatusBar: View {
     }
 
     private func formatRelativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        sharedRelativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func startMonitoringNetwork() {
-        Task {
-            while !Task.isCancelled {
-                await self.checkConnectivity()
-                try? await Task.sleep(for: .seconds(10))
-            }
+    private func monitorNetwork() async {
+        while !Task.isCancelled {
+            await self.checkConnectivity()
+            try? await Task.sleep(for: .seconds(10))
         }
     }
 

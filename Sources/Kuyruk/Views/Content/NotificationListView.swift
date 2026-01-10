@@ -225,5 +225,7 @@ struct NotificationListView: View {
 }
 
 #Preview {
-    NotificationListView()
+    // Preview requires mock services - shown as placeholder
+    Text("NotificationListView Preview - requires NotificationsViewModel environment")
+        .frame(width: 400, height: 500)
 }

@@ -33,25 +33,36 @@ struct NotificationDetailView: View {
     @ViewBuilder
     private func detailContent(for notification: GitHubNotification) -> some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Header
-                self.headerSection(for: notification)
-
-                Divider()
-
-                // Info section
-                self.infoSection(for: notification)
-
-                Divider()
-
-                // Actions
-                self.actionsSection(for: notification)
-
-                Spacer()
+            if #available(macOS 26, *) {
+                GlassEffectContainer(spacing: 24) {
+                    self.detailSections(for: notification)
+                }
+            } else {
+                self.detailSections(for: notification)
             }
-            .padding(24)
         }
         .navigationTitle(notification.repository.name)
+    }
+
+    @ViewBuilder
+    private func detailSections(for notification: GitHubNotification) -> some View {
+        VStack(spacing: 24) {
+            // Header
+            self.headerSection(for: notification)
+
+            Divider()
+
+            // Info section
+            self.infoSection(for: notification)
+
+            Divider()
+
+            // Actions
+            self.actionsSection(for: notification)
+
+            Spacer()
+        }
+        .padding(24)
     }
 
     // MARK: - Header Section
@@ -87,15 +98,10 @@ struct NotificationDetailView: View {
 
     @ViewBuilder
     private func infoSection(for notification: GitHubNotification) -> some View {
-        if #available(macOS 26, *) {
-            GlassEffectContainer(spacing: 12) {
-                self.infoGrid(for: notification)
-                    .glassEffect(in: .rect(cornerRadius: 12))
-            }
-        } else {
-            self.infoGrid(for: notification)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        }
+        // Note: Already inside GlassEffectContainer from detailContent,
+        // so use regular background instead of glassEffect to avoid glass-on-glass
+        self.infoGrid(for: notification)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -137,6 +143,7 @@ struct NotificationDetailView: View {
     private func actionsSection(for notification: GitHubNotification) -> some View {
         VStack(spacing: 12) {
             // Primary action - Open in Browser
+            // Note: Use bordered styles inside GlassEffectContainer to avoid glass-on-glass
             Button {
                 if let url = notification.webUrl {
                     NSWorkspace.shared.open(url)
@@ -181,5 +188,7 @@ struct NotificationDetailView: View {
 }
 
 #Preview {
-    NotificationDetailView()
+    // Preview requires mock services - shown as placeholder
+    Text("NotificationDetailView Preview - requires NotificationsViewModel environment")
+        .frame(width: 400, height: 500)
 }

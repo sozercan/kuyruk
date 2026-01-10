@@ -233,7 +233,9 @@ struct MainWindow: View {
 }
 
 #Preview {
-    MainWindow()
+    // Preview requires mock services - shown as placeholder
+    Text("MainWindow Preview - requires AuthService and NotificationsViewModel environments")
+        .frame(width: 600, height: 400)
 }
 
 // MARK: - Keyboard Navigation Modifier

@@ -165,5 +165,7 @@ struct AccountSettingsView: View {
 }
 
 #Preview {
-    SettingsView()
+    // Preview requires mock services - shown as placeholder
+    Text("SettingsView Preview - requires AuthService and NotificationService environments")
+        .frame(width: 500, height: 350)
 }

@@ -32,15 +32,16 @@ struct CommandPalette: View {
 
     @State private var searchText: String = ""
     @State private var selectedIndex: Int = 0
+    @State private var cachedCommands: [PaletteCommand] = []
     @FocusState private var isSearchFocused: Bool
 
+    /// Filtered commands based on search text (uses cached commands)
     private var filteredCommands: [PaletteCommand] {
-        let allCommands = self.buildCommands()
         if self.searchText.isEmpty {
-            return allCommands
+            return self.cachedCommands
         }
         let query = self.searchText.lowercased()
-        return allCommands.filter {
+        return self.cachedCommands.filter {
             $0.title.lowercased().contains(query) ||
                 ($0.subtitle?.lowercased().contains(query) ?? false)
         }
@@ -48,64 +49,10 @@ struct CommandPalette: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search field
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-
-                TextField("Type a command or search...", text: self.$searchText)
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    .focused(self.$isSearchFocused)
-
-                if !self.searchText.isEmpty {
-                    Button {
-                        self.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding()
-
+            self.searchField
             Divider()
-
-            // Commands list
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(self.filteredCommands.enumerated()), id: \.element.id) { index, command in
-                            CommandRow(
-                                command: command,
-                                isSelected: index == self.selectedIndex)
-                                .id(command.id)
-                                .onTapGesture {
-                                    self.executeCommand(command)
-                                }
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 8)
-                }
-                .onChange(of: self.selectedIndex) { _, newIndex in
-                    if let command = self.filteredCommands[safe: newIndex] {
-                        withAnimation(.easeInOut(duration: 0.1)) {
-                            proxy.scrollTo(command.id, anchor: .center)
-                        }
-                    }
-                }
-            }
-
-            if self.filteredCommands.isEmpty {
-                ContentUnavailableView {
-                    Label("No Results", systemImage: "magnifyingglass")
-                } description: {
-                    Text("No commands match '\(self.searchText)'")
-                }
-                .frame(height: 150)
-            }
+            self.commandsList
+            self.emptyStateIfNeeded
         }
         .frame(width: 500, height: 400)
         .background(.regularMaterial)
@@ -113,6 +60,7 @@ struct CommandPalette: View {
         .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
         .onAppear {
             self.isSearchFocused = true
+            self.cachedCommands = self.buildCommands()
         }
         .onKeyPress(.downArrow) {
             self.moveSelection(by: 1)
@@ -134,6 +82,74 @@ struct CommandPalette: View {
         }
         .onChange(of: self.searchText) { _, _ in
             self.selectedIndex = 0
+        }
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var searchField: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Type a command or search...", text: self.$searchText)
+                .textFieldStyle(.plain)
+                .font(.title3)
+                .focused(self.$isSearchFocused)
+
+            if !self.searchText.isEmpty {
+                Button {
+                    self.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private var commandsList: some View {
+        let commands = self.filteredCommands
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(commands.indices, id: \.self) { index in
+                        let command = commands[index]
+                        CommandRow(
+                            command: command,
+                            isSelected: index == self.selectedIndex)
+                            .id(command.id)
+                            .onTapGesture {
+                                self.executeCommand(command)
+                            }
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+            }
+            .onChange(of: self.selectedIndex) { _, newIndex in
+                if let command = commands[safe: newIndex] {
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        proxy.scrollTo(command.id, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyStateIfNeeded: some View {
+        if self.filteredCommands.isEmpty {
+            ContentUnavailableView {
+                Label("No Results", systemImage: "magnifyingglass")
+            } description: {
+                Text("No commands match '\(self.searchText)'")
+            }
+            .frame(height: 150)
         }
     }
 
@@ -344,5 +360,7 @@ extension Array {
 }
 
 #Preview {
-    CommandPalette()
+    // Preview requires mock services - shown as placeholder
+    Text("CommandPalette Preview - requires NotificationsViewModel environment")
+        .frame(width: 500, height: 400)
 }
