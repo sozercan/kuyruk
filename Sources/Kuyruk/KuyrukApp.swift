@@ -14,6 +14,7 @@ struct KuyrukApp: App {
     @State private var notificationService: NotificationService
     @State private var syncService: SyncService
     @State private var viewModel: NotificationsViewModel
+    @State private var modelsService: GitHubModelsService
 
     // MARK: - Initialization
 
@@ -38,12 +39,16 @@ struct KuyrukApp: App {
             notificationService: notifications)
         let vm = NotificationsViewModel(gitHubClient: client, dataStore: store, syncService: sync)
 
+        // Initialize AI models service
+        let models = GitHubModelsService(authService: auth, dataStore: store)
+
         self._authService = State(initialValue: auth)
         self._gitHubClient = State(initialValue: client)
         self._dataStore = State(initialValue: store)
         self._notificationService = State(initialValue: notifications)
         self._syncService = State(initialValue: sync)
         self._viewModel = State(initialValue: vm)
+        self._modelsService = State(initialValue: models)
     }
 
     // MARK: - Body
@@ -53,9 +58,11 @@ struct KuyrukApp: App {
             MainWindow()
                 .environment(self.authService)
                 .environment(self.gitHubClient)
+                .environment(self.dataStore)
                 .environment(self.notificationService)
                 .environment(self.syncService)
                 .environment(self.viewModel)
+                .environment(self.modelsService)
                 .modelContainer(self.dataStore.container)
                 .task {
                     await self.onAppLaunch()
@@ -82,6 +89,7 @@ struct KuyrukApp: App {
             SettingsView()
                 .environment(self.authService)
                 .environment(self.notificationService)
+                .environment(self.modelsService)
                 .onChange(of: UserDefaults.standard.bool(forKey: "showInMenuBar")) { _, _ in
                     self.appDelegate.updateMenuBarVisibility()
                 }

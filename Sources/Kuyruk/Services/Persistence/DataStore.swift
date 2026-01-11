@@ -19,6 +19,7 @@ final class DataStore {
         let schema = Schema([
             CachedNotification.self,
             CachedRepository.self,
+            CachedSummary.self,
         ])
 
         let modelConfiguration = ModelConfiguration(
@@ -41,6 +42,7 @@ final class DataStore {
         let schema = Schema([
             CachedNotification.self,
             CachedRepository.self,
+            CachedSummary.self,
         ])
 
         let modelConfiguration = ModelConfiguration(
@@ -265,6 +267,156 @@ final class DataStore {
 
         try self.modelContext.save()
         DiagnosticsLogger.info("Cleaned up \(old.count) old notifications", category: .data)
+    }
+
+    // MARK: - AI Summaries
+
+    /// Saves or updates a summary for a notification.
+    /// - Parameters:
+    ///   - summary: The generated summary text.
+    ///   - notification: The notification this summary is for.
+    ///   - model: The model ID used to generate the summary.
+    func saveSummary(_ summary: String, for notification: GitHubNotification, model: String) throws {
+        let descriptor = FetchDescriptor<CachedSummary>(
+            predicate: #Predicate { $0.notificationId == notification.id })
+
+        if let existing = try modelContext.fetch(descriptor).first {
+            // Update existing summary
+            existing.summary = summary
+            existing.notificationUpdatedAt = notification.updatedAt
+            existing.modelUsed = model
+            existing.generatedAt = Date()
+        } else {
+            // Insert new summary
+            let cached = CachedSummary(
+                notificationId: notification.id,
+                notificationUpdatedAt: notification.updatedAt,
+                summary: summary,
+                modelUsed: model)
+            self.modelContext.insert(cached)
+        }
+
+        try self.modelContext.save()
+        DiagnosticsLogger.debug("Saved summary for notification \(notification.id)", category: .data)
+    }
+
+    /// Updates a specific analysis field for a notification.
+    /// - Parameters:
+    ///   - notificationId: The notification ID.
+    ///   - notificationUpdatedAt: The notification's updated timestamp.
+    ///   - type: The type of analysis being saved.
+    ///   - value: The analysis result.
+    ///   - priorityExplanation: Optional explanation (only for priority type).
+    ///   - model: The model ID used for generation.
+    func updateAnalysis(
+        for notificationId: String,
+        notificationUpdatedAt: Date,
+        type: AnalysisType,
+        value: String,
+        priorityExplanation: String? = nil,
+        model: String) throws {
+        let descriptor = FetchDescriptor<CachedSummary>(
+            predicate: #Predicate { $0.notificationId == notificationId })
+
+        if let existing = try modelContext.fetch(descriptor).first {
+            // Update existing record
+            existing.notificationUpdatedAt = notificationUpdatedAt
+            existing.modelUsed = model
+            existing.generatedAt = Date()
+
+            switch type {
+            case .summary:
+                existing.summary = value
+            case .threadSummary:
+                existing.threadSummary = value
+            case .priority:
+                existing.priorityScore = value
+                existing.priorityExplanation = priorityExplanation
+            case .action:
+                existing.actionRecommendation = value
+            }
+        } else {
+            // Create new record with just this field
+            let cached = switch type {
+            case .summary:
+                CachedSummary(
+                    notificationId: notificationId,
+                    notificationUpdatedAt: notificationUpdatedAt,
+                    summary: value,
+                    modelUsed: model)
+            case .threadSummary:
+                CachedSummary(
+                    notificationId: notificationId,
+                    notificationUpdatedAt: notificationUpdatedAt,
+                    summary: "",
+                    threadSummary: value,
+                    modelUsed: model)
+            case .priority:
+                CachedSummary(
+                    notificationId: notificationId,
+                    notificationUpdatedAt: notificationUpdatedAt,
+                    summary: "",
+                    priorityScore: value,
+                    priorityExplanation: priorityExplanation,
+                    modelUsed: model)
+            case .action:
+                CachedSummary(
+                    notificationId: notificationId,
+                    notificationUpdatedAt: notificationUpdatedAt,
+                    summary: "",
+                    actionRecommendation: value,
+                    modelUsed: model)
+            }
+            self.modelContext.insert(cached)
+        }
+
+        try self.modelContext.save()
+        DiagnosticsLogger.debug("Saved \(type.rawValue) analysis for notification \(notificationId)", category: .data)
+    }
+
+    /// Fetches a cached summary for a notification.
+    /// - Parameter notificationId: The notification ID to look up.
+    /// - Returns: The cached summary if found.
+    func fetchSummary(for notificationId: String) throws -> CachedSummary? {
+        let descriptor = FetchDescriptor<CachedSummary>(
+            predicate: #Predicate { $0.notificationId == notificationId })
+
+        return try self.modelContext.fetch(descriptor).first
+    }
+
+    /// Invalidates (deletes) a cached summary for a notification.
+    /// - Parameter notificationId: The notification ID whose summary should be deleted.
+    func invalidateSummary(for notificationId: String) throws {
+        let descriptor = FetchDescriptor<CachedSummary>(
+            predicate: #Predicate { $0.notificationId == notificationId })
+
+        if let summary = try modelContext.fetch(descriptor).first {
+            self.modelContext.delete(summary)
+            try self.modelContext.save()
+            DiagnosticsLogger.debug("Invalidated summary for notification \(notificationId)", category: .data)
+        }
+    }
+
+    /// Cleans up old summaries to prevent unbounded storage growth.
+    /// - Parameter days: Delete summaries older than this many days (default: 7).
+    func cleanupOldSummaries(olderThan days: Int = 7) throws {
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            return
+        }
+
+        let descriptor = FetchDescriptor<CachedSummary>(
+            predicate: #Predicate { $0.generatedAt < cutoffDate })
+
+        let old = try self.modelContext.fetch(descriptor)
+
+        for summary in old {
+            self.modelContext.delete(summary)
+        }
+
+        if !old.isEmpty {
+            try self.modelContext.save()
+            DiagnosticsLogger.info("Cleaned up \(old.count) old summaries", category: .data)
+        }
     }
 
     // MARK: - Repositories

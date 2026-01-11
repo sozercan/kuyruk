@@ -21,12 +21,19 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate, Sendable {
     /// Then update these values to match.
     ///
     /// Current pins (as of January 2026):
-    /// - Sectigo intermediate and root CAs
+    /// - Sectigo intermediate and root CAs (api.github.com)
+    /// - GitHub Models API pins (models.github.ai)
     private static let pinnedHashes: Set<String> = [
         // Sectigo Public Server Authentication CA DV E36 (intermediate)
         "VqePxH3EcFwZuYK3CCOMz5HKMoeIZpZcEyBf4diPGSA=",
         // Sectigo Public Server Authentication Root E46 (root)
         "EdsvlytFf4a/O+hCPwBXFFi46RKXqivCAF+mO7s+5Ng=",
+        // models.github.ai - Leaf certificate
+        "0eD6+p++C3Ts3ydDtLigKkhS5dAxHRjhtXLyfz6JPuE=",
+        // models.github.ai - Intermediate certificate
+        "TCAFfcfLpnjdFcUGvKSxe8jNIlxxtREjh1HdnHqql+Q=",
+        // models.github.ai - Root certificate
+        "FifhKLh4RFnK/GDH4ipsrxcrFLDJMTWTaaMGG+2Qwz0=",
     ]
 
     /// Whether to enforce pinning (disable in debug for testing if needed)
@@ -53,7 +60,10 @@ final class CertificatePinningDelegate: NSObject, URLSessionDelegate, Sendable {
 
         // Only pin for GitHub domains
         let host = challenge.protectionSpace.host
-        guard host.hasSuffix("github.com") || host.hasSuffix("githubusercontent.com") else {
+        guard host.hasSuffix("github.com") ||
+            host.hasSuffix("githubusercontent.com") ||
+            host == "models.github.ai"
+        else {
             completionHandler(.performDefaultHandling, nil)
             return
         }

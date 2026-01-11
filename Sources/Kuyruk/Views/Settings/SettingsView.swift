@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AuthService.self) private var authService
     @Environment(NotificationService.self) private var notificationService
+    @Environment(GitHubModelsService.self) private var modelsService
 
     var body: some View {
         TabView {
@@ -18,8 +19,15 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Account", systemImage: "person.crop.circle")
                 }
+
+            AISettingsView()
+                .environment(self.modelsService)
+                .environment(self.authService)
+                .tabItem {
+                    Label("AI", systemImage: "sparkles")
+                }
         }
-        .frame(width: 500, height: 350)
+        .frame(width: 500, height: 400)
     }
 }
 

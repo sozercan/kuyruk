@@ -107,7 +107,10 @@ final class NotificationsViewModel {
                 let readCount = self.notifications.count(where: { !$0.unread })
                 let unreadCount = self.notifications.filter(\.unread).count
                 DiagnosticsLogger.info(
-                    "Loaded \(self.notifications.count) notifications from cache (\(readCount) read, \(unreadCount) unread)",
+                    """
+                    Loaded \(self.notifications.count) notifications from cache \
+                    (\(readCount) read, \(unreadCount) unread)
+                    """,
                     category: .ui)
 
                 // Prefetch avatars for visible items
@@ -370,6 +373,21 @@ final class NotificationsViewModel {
         } catch {
             DiagnosticsLogger.error(error, context: "checkExpiredSnoozes", category: .ui)
         }
+    }
+
+    // MARK: - AI Summary Cache
+
+    /// Fetch cached summary for a notification.
+    /// - Parameter notification: The notification to fetch the summary for.
+    /// - Returns: The cached summary if available, nil otherwise.
+    func cachedSummary(for notification: GitHubNotification) -> CachedSummary? {
+        try? self.dataStore.fetchSummary(for: notification.id)
+    }
+
+    /// Invalidate all cached summaries (e.g., when clearing cache).
+    /// This removes all cached AI-generated summaries from the store.
+    func invalidateSummaryCache() {
+        try? self.dataStore.cleanupOldSummaries(olderThan: 0)
     }
 
     // MARK: - Private Methods

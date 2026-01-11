@@ -4,13 +4,15 @@ import Foundation
 /// Usage: swift run api-explorer <command> [options]
 ///
 /// Commands:
-///   auth              - Check authentication status
-///   notifications     - List notifications
-///   notification <id> - Get notification details
-///   user              - Get current user info
+///   auth                   - Check authentication status
+///   notifications          - List notifications
+///   notification <id>      - Get notification details
+///   user                   - Get current user info
+///   models                 - List available GitHub Models
+///   models-chat <prompt>   - Test chat completion with GitHub Models
 ///
 /// Options:
-///   -v, --verbose     - Show verbose output
+///   -v, --verbose          - Show verbose output
 
 @main
 struct APIExplorer {
@@ -42,6 +44,20 @@ struct APIExplorer {
 
         case "user":
             await Self.getCurrentUser(verbose: verbose)
+
+        case "models":
+            await Self.listModels(verbose: verbose)
+
+        case "models-chat":
+            guard arguments.count > 2 else {
+                print("❌ Error: Missing prompt")
+                print("Usage: api-explorer models-chat <prompt>")
+                return
+            }
+            // Collect all remaining arguments as the prompt (allows multi-word prompts)
+            let promptArgs = arguments.dropFirst(2).filter { !$0.hasPrefix("-") }
+            let prompt = promptArgs.joined(separator: " ")
+            await Self.chatCompletion(prompt: prompt, verbose: verbose)
 
         case "help",
              "-h",
@@ -128,7 +144,6 @@ struct APIExplorer {
                     print(jsonString)
                 }
             }
-
         } catch {
             print("❌ Error: \(error)")
         }
@@ -155,7 +170,6 @@ struct APIExplorer {
             if let jsonString = String(data: data, encoding: .utf8) {
                 print(jsonString)
             }
-
         } catch {
             print("❌ Error: \(error)")
         }
@@ -197,7 +211,124 @@ struct APIExplorer {
                     print(jsonString)
                 }
             }
+        } catch {
+            print("❌ Error: \(error)")
+        }
+    }
 
+    // MARK: - GitHub Models Commands
+
+    private static func listModels(verbose: Bool) async {
+        print("🤖 Fetching available GitHub Models...\n")
+
+        guard let token = getToken() else {
+            print("❌ No token found. Set GITHUB_TOKEN environment variable.")
+            return
+        }
+
+        do {
+            let (data, response) = try await modelsRequest(
+                path: "/catalog/models",
+                method: "GET",
+                body: nil,
+                token: token,
+                verbose: verbose)
+
+            Self.printRateLimitInfo(response)
+
+            if verbose {
+                Self.printResponseHeaders(response)
+            }
+
+            let decoder = JSONDecoder()
+            let models = try decoder.decode([ModelsResponse].self, from: data)
+
+            print("Found \(models.count) models:\n")
+
+            for model in models {
+                print("📦 \(model.name)")
+                print("   Publisher: \(model.publisher)")
+                if let displayName = model.displayName {
+                    print("   Display: \(displayName)")
+                }
+                if let modelType = model.modelType {
+                    print("   Type: \(modelType)")
+                }
+                print("")
+            }
+
+            if verbose {
+                print("\n📄 Raw JSON:")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print(jsonString)
+                }
+            }
+        } catch {
+            print("❌ Error: \(error)")
+        }
+    }
+
+    private static func chatCompletion(prompt: String, verbose: Bool) async {
+        print("💬 Testing chat completion...\n")
+        print("📝 Prompt: \(prompt)\n")
+
+        guard let token = getToken() else {
+            print("❌ No token found. Set GITHUB_TOKEN environment variable.")
+            return
+        }
+
+        // Build request body
+        let requestBody: [String: Any] = [
+            "model": "gpt-4o",
+            "messages": [
+                ["role": "system", "content": "You are a helpful assistant."],
+                ["role": "user", "content": prompt],
+            ],
+        ]
+
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: requestBody, options: []) else {
+            print("❌ Failed to serialize request body")
+            return
+        }
+
+        do {
+            let (data, response) = try await modelsRequest(
+                path: "/inference/chat/completions",
+                method: "POST",
+                body: bodyData,
+                token: token,
+                verbose: verbose)
+
+            Self.printRateLimitInfo(response)
+
+            if verbose {
+                Self.printResponseHeaders(response)
+            }
+
+            // Parse response
+            let decoder = JSONDecoder()
+            let chatResponse = try decoder.decode(ChatCompletionResponse.self, from: data)
+
+            if let firstChoice = chatResponse.choices.first {
+                print("🤖 Response:")
+                print("─────────────────────────────────────")
+                print(firstChoice.message.content)
+                print("─────────────────────────────────────")
+
+                if let usage = chatResponse.usage {
+                    print("\n📊 Token Usage:")
+                    print("   Prompt tokens: \(usage.promptTokens)")
+                    print("   Completion tokens: \(usage.completionTokens)")
+                    print("   Total tokens: \(usage.totalTokens)")
+                }
+            }
+
+            if verbose {
+                print("\n📄 Raw JSON:")
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print(jsonString)
+                }
+            }
         } catch {
             print("❌ Error: \(error)")
         }
@@ -210,7 +341,9 @@ struct APIExplorer {
     }
 
     private static func request(path: String, token: String) async throws -> (Data, URLResponse) {
-        let url = URL(string: "https://api.github.com\(path)")!
+        guard let url = URL(string: "https://api.github.com\(path)") else {
+            throw APIExplorerError.invalidURL("https://api.github.com\(path)")
+        }
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -218,6 +351,76 @@ struct APIExplorer {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
 
         return try await URLSession.shared.data(for: request)
+    }
+
+    private static func modelsRequest(
+        path: String,
+        method: String,
+        body: Data?,
+        token: String,
+        verbose: Bool) async throws -> (Data, HTTPURLResponse) {
+        guard let url = URL(string: "https://models.github.ai\(path)") else {
+            throw APIExplorerError.invalidURL("https://models.github.ai\(path)")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+
+        // Use a custom session delegate to capture certificate info in verbose mode
+        let session: URLSession
+        if verbose {
+            let delegate = CertificateLoggingDelegate()
+            session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        } else {
+            session = URLSession.shared
+        }
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIExplorerError.invalidResponse
+        }
+
+        // Check for error status codes
+        if httpResponse.statusCode >= 400 {
+            let errorBody = String(data: data, encoding: .utf8) ?? "No error body"
+            print("❌ HTTP \(httpResponse.statusCode): \(errorBody)")
+
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                print("\n⚠️  Your token may not have access to GitHub Models.")
+                print("   Ensure your token has the required scopes.")
+            }
+        }
+
+        return (data, httpResponse)
+    }
+
+    private static func printRateLimitInfo(_ response: HTTPURLResponse) {
+        print("📊 Rate Limit Info:")
+        if let remaining = response.value(forHTTPHeaderField: "X-RateLimit-Remaining") {
+            print("   Remaining: \(remaining)")
+        }
+        if let limit = response.value(forHTTPHeaderField: "X-RateLimit-Limit") {
+            print("   Limit: \(limit)")
+        }
+        if let reset = response.value(forHTTPHeaderField: "X-RateLimit-Reset") {
+            if let timestamp = Double(reset) {
+                let date = Date(timeIntervalSince1970: timestamp)
+                let formatter = DateFormatter()
+                formatter.dateStyle = .short
+                formatter.timeStyle = .short
+                print("   Reset: \(formatter.string(from: date))")
+            }
+        }
+        print("")
     }
 
     private static func printResponseHeaders(_ response: URLResponse) {
@@ -245,23 +448,27 @@ struct APIExplorer {
         Usage: api-explorer <command> [options]
 
         Commands:
-            auth              Check authentication status
-            notifications     List notifications
-            notification <id> Get notification thread details
-            user              Get current user info
-            help              Show this help message
+            auth                   Check authentication status
+            notifications          List notifications
+            notification <id>      Get notification thread details
+            user                   Get current user info
+            models                 List available GitHub Models
+            models-chat <prompt>   Test chat completion with GitHub Models
+            help                   Show this help message
 
         Options:
-            -v, --verbose     Show verbose output (headers, raw JSON)
+            -v, --verbose          Show verbose output (headers, raw JSON, cert info)
 
         Environment:
-            GITHUB_TOKEN      GitHub personal access token (required)
+            GITHUB_TOKEN           GitHub personal access token (required)
 
         Examples:
             export GITHUB_TOKEN=ghp_your_token
             swift run api-explorer auth
             swift run api-explorer notifications -v
             swift run api-explorer notification 12345678
+            swift run api-explorer models -v
+            swift run api-explorer models-chat "Hello, how are you?"
         """)
     }
 }
@@ -300,3 +507,145 @@ private struct UserResponse: Decodable {
     let followers: Int
     let following: Int
 }
+
+// MARK: - GitHub Models Response Models
+
+private struct ModelsResponse: Decodable {
+    let name: String
+    let displayName: String?
+    let publisher: String
+    let modelType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case displayName = "friendly_name"
+        case publisher
+        case modelType = "model_type"
+    }
+}
+
+private struct ChatCompletionResponse: Decodable {
+    let id: String?
+    let object: String?
+    let created: Int?
+    let model: String?
+    let choices: [Choice]
+    let usage: Usage?
+
+    struct Choice: Decodable {
+        let index: Int?
+        let message: Message
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case index
+            case message
+            case finishReason = "finish_reason"
+        }
+    }
+
+    struct Message: Decodable {
+        let role: String
+        let content: String
+    }
+
+    struct Usage: Decodable {
+        let promptTokens: Int
+        let completionTokens: Int
+        let totalTokens: Int
+
+        enum CodingKeys: String, CodingKey {
+            case promptTokens = "prompt_tokens"
+            case completionTokens = "completion_tokens"
+            case totalTokens = "total_tokens"
+        }
+    }
+}
+
+// MARK: - Errors
+
+private enum APIExplorerError: Error, CustomStringConvertible {
+    case invalidResponse
+    case invalidURL(String)
+
+    var description: String {
+        switch self {
+        case .invalidResponse:
+            "Invalid response from server"
+        case let .invalidURL(urlString):
+            "Invalid URL: \(urlString)"
+        }
+    }
+}
+
+// MARK: - Certificate Logging Delegate
+
+/// URLSession delegate that logs certificate information for pin discovery
+private final class CertificateLoggingDelegate: NSObject, URLSessionDelegate {
+    func urlSession(
+        _: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        let host = challenge.protectionSpace.host
+        print("\n🔐 Certificate Info for \(host):")
+
+        // Get certificate chain
+        if let certificateChain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate] {
+            for (index, certificate) in certificateChain.enumerated() {
+                let certData = SecCertificateCopyData(certificate) as Data
+
+                // Get subject summary
+                let summary = SecCertificateCopySubjectSummary(certificate) as String? ?? "Unknown"
+                print("   [\(index)] \(summary)")
+
+                // Calculate SPKI hash for pinning
+                if let spkiHash = Self.calculateSPKIHash(from: certData) {
+                    print("       SPKI SHA-256: \(spkiHash)")
+                }
+            }
+        }
+        print("")
+
+        // Allow the connection to proceed
+        let credential = URLCredential(trust: serverTrust)
+        completionHandler(.useCredential, credential)
+    }
+
+    /// Calculate SPKI (Subject Public Key Info) SHA-256 hash for certificate pinning
+    private static func calculateSPKIHash(from certData: Data) -> String? {
+        // Create a certificate from the data
+        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
+            return nil
+        }
+
+        // Extract the public key
+        var publicKey: SecKey?
+        if #available(macOS 10.14, *) {
+            publicKey = SecCertificateCopyKey(certificate)
+        }
+
+        guard let key = publicKey,
+              let keyData = SecKeyCopyExternalRepresentation(key, nil) as Data?
+        else {
+            return nil
+        }
+
+        // Hash the public key data
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        keyData.withUnsafeBytes { buffer in
+            _ = CC_SHA256(buffer.baseAddress, CC_LONG(buffer.count), &hash)
+        }
+
+        return Data(hash).base64EncodedString()
+    }
+}
+
+// Import CommonCrypto for SHA256
+import CommonCrypto

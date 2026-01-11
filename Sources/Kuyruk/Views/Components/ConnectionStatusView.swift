@@ -246,8 +246,12 @@ struct SyncStatusBar: View {
 struct PendingActionsView: View {
     let count: Int
 
+    private var isEmpty: Bool {
+        self.isEmpty
+    }
+
     var body: some View {
-        if self.count > 0 {
+        if !self.isEmpty {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption2)

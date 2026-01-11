@@ -39,6 +39,7 @@ What becomes easier or more difficult to do because of this change?
 | [0003](0003-liquid-glass-design.md) | Liquid Glass Design Language | Accepted |
 | [0004](0004-swift-package-manager.md) | Swift Package Manager as Primary Build System | Accepted |
 | [0005](0005-swiftdata-persistence.md) | SwiftData for Local Persistence | Accepted |
+| [0006](0006-github-models-integration.md) | GitHub Models Integration for AI Summaries | Accepted |
 
 ## Creating a New ADR
 
