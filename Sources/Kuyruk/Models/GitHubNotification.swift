@@ -115,4 +115,19 @@ extension GitHubNotification {
 
         return URL(string: webUrlString)
     }
+
+    /// Returns the VS Code deep link URL for opening in VS Code with GitHub Pull Requests extension.
+    /// Only available for pull requests.
+    var vscodeUrl: URL? {
+        guard self.subject.type == .pullRequest,
+              let number = self.subjectNumber else { return nil }
+
+        // VS Code GitHub Pull Requests extension deep link format:
+        // vscode://github.vscode-pull-request-github/open-pull-request-webview?uri=https://github.com/owner/repo/pull/123
+        let prUrl = "https://github.com/\(self.repository.fullName)/pull/\(number)"
+        guard let encodedPrUrl = prUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return URL(string: "vscode://github.vscode-pull-request-github/open-pull-request-webview?uri=\(encodedPrUrl)")
+    }
 }

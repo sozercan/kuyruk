@@ -188,19 +188,38 @@ struct NotificationDetailView: View {
     @ViewBuilder
     private func actionsSection(for notification: GitHubNotification) -> some View {
         VStack(spacing: 12) {
-            // Primary action - Open in Browser
-            // Note: Use bordered styles inside GlassEffectContainer to avoid glass-on-glass
-            Button {
-                if let url = notification.webUrl {
-                    NSWorkspace.shared.open(url)
+            // Primary actions row
+            HStack(spacing: 12) {
+                // Open in Browser
+                // Note: Use bordered styles inside GlassEffectContainer to avoid glass-on-glass
+                Button {
+                    if let url = notification.webUrl {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Open in Browser", systemImage: "safari")
+                        .frame(maxWidth: .infinity)
                 }
-            } label: {
-                Label("Open in Browser", systemImage: "safari")
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut("o", modifiers: .command)
+
+                // Open in VS Code (only for pull requests)
+                if notification.subject.type == .pullRequest {
+                    Button {
+                        if let url = notification.vscodeUrl {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("Open in VS Code", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .keyboardShortcut("e", modifiers: .command)
+                    .help("Opens in VS Code with the GitHub Pull Requests extension")
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut("o", modifiers: .command)
 
             // Secondary actions
             HStack(spacing: 12) {

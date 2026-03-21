@@ -113,8 +113,6 @@ struct SyncStatusBar: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Divider()
-
             HStack(spacing: 8) {
                 // Status indicator
                 Circle()
@@ -149,6 +147,9 @@ struct SyncStatusBar: View {
                 }
             }
             .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 8)
             .padding(.bottom, 8)
             .contentShape(Rectangle())
             .onTapGesture {

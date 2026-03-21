@@ -148,7 +148,10 @@ struct NotificationListView: View {
                 }
             }
             .listStyle(.inset)
-                .overlay(alignment: .top) {
+            .scrollClipDisabled()
+            .scrollContentBackground(.visible)
+            .contentMargins(.vertical, 0, for: .scrollContent)
+            .overlay(alignment: .top) {
                     // Show refreshing indicator at top when updating in background
                     if self.viewModel.isRefreshing {
                         HStack(spacing: 8) {

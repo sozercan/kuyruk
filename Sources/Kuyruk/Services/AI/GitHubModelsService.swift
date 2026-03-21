@@ -537,6 +537,9 @@ final class GitHubModelsService {
     }
 
     /// Builds an authenticated request for the Models API.
+    ///
+    /// The catalog endpoint uses GitHub REST API headers, while the inference
+    /// endpoint uses standard JSON headers.
     private func buildRequest(path: String, method: String) throws -> URLRequest {
         guard let token = self.authService.state.accessToken else {
             throw GitHubError.unauthorized
@@ -549,8 +552,15 @@ final class GitHubModelsService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+
+        if path == Constants.inferencePath {
+            // Inference endpoint uses standard JSON headers
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+        } else {
+            // Catalog and other endpoints use GitHub REST API headers
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        }
 
         return request
     }
