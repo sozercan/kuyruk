@@ -72,9 +72,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, and 
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Design inspired by [Apple Reminders](https://support.apple.com/guide/reminders/welcome/mac)
-- Architecture patterns from [sozercan/kaset](https://github.com/sozercan/kaset)
-- Skills from [Dimillian/Skills](https://github.com/Dimillian/Skills)

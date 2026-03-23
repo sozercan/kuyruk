@@ -91,8 +91,6 @@ If you discover new response structures or endpoint behaviors, update `docs/api-
 
 > 🚨 **NEVER leak secrets, tokens, or API keys** — Under NO circumstances include real OAuth tokens, API keys, personal access tokens, or any sensitive credentials in code, comments, logs, documentation, test fixtures, or any output. Always use placeholder values like `"REDACTED"`, `"mock-token"`, or `"test-token"` in examples and tests.
 
-> ⚠️ **NEVER run `git commit` or `git push`** — Always leave committing and pushing to the human.
-
 > ⚠️ **No Third-Party Frameworks** — Do not introduce third-party dependencies without asking first.
 
 > 📝 **Document Architectural Decisions** — For significant design changes, create an ADR in `docs/adr/` following the format in `docs/adr/README.md`.
