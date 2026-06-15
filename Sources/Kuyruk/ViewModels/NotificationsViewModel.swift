@@ -19,6 +19,9 @@ final class NotificationsViewModel {
     /// Pre-computed grouped notifications (updated only when data changes)
     private(set) var groupedNotifications: [(key: String, value: [GitHubNotification])] = []
 
+    /// Currently selected top-level destination
+    var appDestination: AppDestination = .notifications
+
     /// Currently selected filter
     var selectedFilter: NotificationFilter = .inbox {
         didSet {
@@ -38,6 +41,18 @@ final class NotificationsViewModel {
     /// Error state
     private(set) var error: Error?
 
+    /// Number of pull requests that still need digest analyses.
+    private(set) var digestPendingPRAnalysisCount: Int = 0
+
+    /// Number of pull requests evaluated during the current digest-prep pass.
+    private(set) var digestEvaluatedPRCount: Int = 0
+
+    /// Monotonic revision used to refresh digest snapshots after cache mutations.
+    private(set) var digestAnalysisRevision: Int = 0
+
+    /// Whether digest analyses are currently being prepared.
+    private(set) var isPreparingDigest: Bool = false
+
     /// Search text (debounced)
     var searchText: String = "" {
         didSet {
@@ -54,6 +69,9 @@ final class NotificationsViewModel {
 
     /// Debounce timer for search
     private var searchDebounceTask: Task<Void, Never>?
+
+    /// Guards against stale digest-preparation work updating observable state.
+    private var digestPreparationRunID = UUID()
 
     /// Debounce delay for search (300ms)
     private let searchDebounceDelay: Duration = .milliseconds(300)
@@ -90,6 +108,39 @@ final class NotificationsViewModel {
     }
 
     // MARK: - Public Methods
+
+    /// Shows the notifications shell while preserving the current filter.
+    func showNotifications() {
+        self.appDestination = .notifications
+    }
+
+    /// Shows the digest shell.
+    func showDigest() {
+        self.appDestination = .digest
+    }
+
+    /// Shows a specific notification, returning to the notifications shell as needed.
+    func showNotification(_ notification: GitHubNotification) {
+        self.showNotifications()
+        self.resetSearchImmediately()
+
+        if !self.selectedFilter.matches(notification) {
+            self.selectedFilter = .repository(notification.repository)
+        }
+
+        self.selectedNotification = notification
+    }
+
+    /// Selects a notification filter and returns to the notifications shell.
+    func selectFilter(_ filter: NotificationFilter) {
+        self.showNotifications()
+        self.selectedFilter = filter
+    }
+
+    /// Selects a repository filter and returns to the notifications shell.
+    func selectRepository(_ repository: Repository) {
+        self.selectFilter(.repository(repository))
+    }
 
     /// Loads notifications from cache on startup, then refreshes in background.
     func loadFromCache() async {
@@ -165,12 +216,16 @@ final class NotificationsViewModel {
             if let notifications = finalNotifications {
                 // Final merge to ensure consistency
                 self.mergeNotifications(notifications)
+                let currentNotificationIds = Set(notifications.map(\.id))
+                let notificationsToPersist = self.notifications
+                let repositoriesToPersist = self.repositories
 
                 // Save to cache in background
-                Task.detached { [dataStore, notifications = self.notifications, repositories = self.repositories] in
+                Task.detached { [dataStore, currentNotificationIds, notificationsToPersist, repositoriesToPersist] in
                     try? await MainActor.run {
-                        try dataStore.saveNotifications(notifications)
-                        try dataStore.saveRepositories(repositories)
+                        try dataStore.markDeletedNotifications(currentIds: currentNotificationIds)
+                        try dataStore.saveNotifications(notificationsToPersist)
+                        try dataStore.saveRepositories(repositoriesToPersist)
                     }
                 }
 
@@ -201,7 +256,9 @@ final class NotificationsViewModel {
         do {
             let notifications = try await self.gitHubClient.fetchAllNotificationsForced()
             self.mergeNotifications(notifications)
+            let currentNotificationIds = Set(notifications.map(\.id))
 
+            try self.dataStore.markDeletedNotifications(currentIds: currentNotificationIds)
             try self.dataStore.saveNotifications(self.notifications)
             try self.dataStore.saveRepositories(self.repositories)
         } catch {
@@ -390,7 +447,121 @@ final class NotificationsViewModel {
         try? self.dataStore.cleanupOldSummaries(olderThan: 0)
     }
 
+    /// Prepares missing digest analyses for pull request notifications.
+    func prepareDigest(using modelsService: any DigestPreparingModelsService) async {
+        let runID = UUID()
+        self.digestPreparationRunID = runID
+
+        guard modelsService.canGenerateSummaries else {
+            self.resetDigestPreparationState()
+            return
+        }
+
+        let pullRequestNotifications = self.pullRequestNotificationsForDigest()
+        self.digestEvaluatedPRCount = 0
+        self.digestPendingPRAnalysisCount = pullRequestNotifications.count(where: {
+            !self.hasCompleteDigestAnalyses(for: $0)
+        })
+        self.isPreparingDigest = self.digestPendingPRAnalysisCount > 0
+
+        guard !pullRequestNotifications.isEmpty else { return }
+
+        guard self.isPreparingDigest else {
+            self.digestEvaluatedPRCount = pullRequestNotifications.count
+            return
+        }
+
+        DiagnosticsLogger.info(
+            """
+            Preparing digest analyses for \(pullRequestNotifications.count) pull requests \
+            with model \(modelsService.selectedModelId ?? "unknown")
+            """,
+            category: .ui)
+
+        defer {
+            if self.digestPreparationRunID == runID {
+                self.isPreparingDigest = false
+            }
+        }
+
+        do {
+            for notification in pullRequestNotifications {
+                try Task.checkCancellation()
+                guard self.digestPreparationRunID == runID else { return }
+
+                let missingTypes = self.missingDigestAnalysisTypes(for: notification)
+                var generatedAnalysis = false
+
+                for type in missingTypes {
+                    do {
+                        _ = try await modelsService.generateAnalysis(for: notification, type: type)
+                        generatedAnalysis = true
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        DiagnosticsLogger.error(
+                            error,
+                            context: "prepareDigest(\(type.rawValue)) \(notification.id)",
+                            category: .ui)
+                    }
+                }
+
+                guard self.digestPreparationRunID == runID else { return }
+
+                if generatedAnalysis {
+                    if self.hasCompleteDigestAnalyses(for: notification) {
+                        self.digestPendingPRAnalysisCount = max(0, self.digestPendingPRAnalysisCount - 1)
+                    }
+                    self.digestAnalysisRevision += 1
+                }
+
+                self.digestEvaluatedPRCount += 1
+            }
+        } catch is CancellationError {
+            DiagnosticsLogger.debug("Digest preparation cancelled", category: .ui)
+        } catch {
+            DiagnosticsLogger.error(error, context: "prepareDigest", category: .ui)
+        }
+    }
+
     // MARK: - Private Methods
+
+    private func resetDigestPreparationState() {
+        self.digestPendingPRAnalysisCount = 0
+        self.digestEvaluatedPRCount = 0
+        self.isPreparingDigest = false
+    }
+
+    private func pullRequestNotificationsForDigest() -> [GitHubNotification] {
+        self.notifications.filter { $0.subject.type == .pullRequest }
+    }
+
+    private func missingDigestAnalysisTypes(for notification: GitHubNotification) -> [AnalysisType] {
+        guard notification.subject.type == .pullRequest else { return [] }
+
+        guard let cached = self.cachedSummary(for: notification),
+              cached.isValid(for: notification) else {
+            return [.priority, .action]
+        }
+
+        var missingTypes: [AnalysisType] = []
+        if !cached.hasAnalysis(for: .priority) {
+            missingTypes.append(.priority)
+        }
+        if !cached.hasAnalysis(for: .action) {
+            missingTypes.append(.action)
+        }
+        return missingTypes
+    }
+
+    private func hasCompleteDigestAnalyses(for notification: GitHubNotification) -> Bool {
+        guard let cached = self.cachedSummary(for: notification),
+              cached.isValid(for: notification) else {
+            return false
+        }
+
+        return cached.hasAnalysis(for: .priority) && cached.hasAnalysis(for: .action)
+    }
 
     /// Updates the pre-computed grouped notifications.
     private func updateGroupedNotifications() {
@@ -416,58 +587,56 @@ final class NotificationsViewModel {
         }
     }
 
+    /// Clears the current search state without waiting for the debounce timer.
+    private func resetSearchImmediately() {
+        guard !self.searchText.isEmpty || !self.debouncedSearchText.isEmpty else { return }
+
+        self.searchDebounceTask?.cancel()
+        self.searchDebounceTask = nil
+
+        // Clear the visible field, then immediately cancel the debounce task created by didSet.
+        self.searchText = ""
+        self.searchDebounceTask?.cancel()
+        self.searchDebounceTask = nil
+
+        self.debouncedSearchText = ""
+        self.updateGroupedNotifications()
+    }
+
     /// Merges fresh notifications with existing data efficiently.
     private func mergeNotifications(_ fresh: [GitHubNotification]) {
         DiagnosticsLogger.debug(
             "Merging \(fresh.count) fresh notifications with \(self.notifications.count) existing",
             category: .ui)
 
-        // Build index of existing notifications for fast lookup
-        var existingById: [String: GitHubNotification] = [:]
-        for notification in self.notifications {
-            existingById[notification.id] = notification
-        }
-
-        // Merge fresh data, preserving local "read" state
-        var merged: [GitHubNotification] = []
-        var seenIds: Set<String> = []
-        var preservedReadCount = 0
-
-        for notification in fresh {
-            // Check if we have a local version that was marked as read
-            if let existing = existingById[notification.id],
-               !existing.unread, notification.unread {
-                // Local is read, API says unread - keep local "read" state
-                // This handles the race condition where we marked as read locally
-                // but the API hasn't caught up yet
-                merged.append(existing)
-                preservedReadCount += 1
-                DiagnosticsLogger.debug(
-                    "Preserved local read state for notification \(notification.id)",
-                    category: .ui)
-            } else {
-                merged.append(notification)
-            }
-            seenIds.insert(notification.id)
-        }
-
-        // Keep notifications that might still be relevant but weren't in this fetch
-        // (e.g., read notifications when fetching unread only)
-        var keptReadCount = 0
-        for notification in self.notifications where !seenIds.contains(notification.id) {
-            // Only keep if it's read (might have been marked read locally)
-            if !notification.unread {
-                merged.append(notification)
-                keptReadCount += 1
-            }
-        }
+        let merged = Self.mergedNotifications(existing: self.notifications, fresh: fresh)
 
         DiagnosticsLogger.debug(
-            "Merge result: \(merged.count) total, \(preservedReadCount) preserved read, \(keptReadCount) kept read",
+            "Merge result: \(merged.count) total notifications",
             category: .ui)
 
         self.notifications = merged
         self.repositories = self.extractRepositories(from: merged)
+        self.selectedNotification = self.selectedNotification.flatMap { selected in
+            merged.first(where: { $0.id == selected.id })
+        }
+    }
+
+    /// Merges notifications while preserving optimistic local read state only for
+    /// threads that are still returned by the API.
+    nonisolated static func mergedNotifications(
+        existing: [GitHubNotification],
+        fresh: [GitHubNotification]) -> [GitHubNotification] {
+        let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+
+        return fresh.map { notification in
+            if let existing = existingById[notification.id],
+               !existing.unread, notification.unread {
+                return existing
+            }
+
+            return notification
+        }
     }
 
     /// Extracts unique repositories from notifications.

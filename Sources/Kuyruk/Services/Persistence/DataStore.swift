@@ -189,9 +189,9 @@ final class DataStore {
     /// Fetches all currently snoozed notifications.
     func fetchSnoozedNotifications() throws -> [CachedNotification] {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let minimumDate = Date.distantPast
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted },
+            predicate: #Predicate { ($0.snoozedUntil ?? minimumDate) > now && !$0.isDeleted },
             sortBy: [SortDescriptor(\.snoozedUntil)])
 
         return try self.modelContext.fetch(descriptor)
@@ -200,9 +200,9 @@ final class DataStore {
     /// Gets the count of snoozed notifications.
     func snoozedCount() throws -> Int {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let minimumDate = Date.distantPast
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted })
+            predicate: #Predicate { ($0.snoozedUntil ?? minimumDate) > now && !$0.isDeleted })
 
         return try self.modelContext.fetchCount(descriptor)
     }
@@ -210,9 +210,9 @@ final class DataStore {
     /// Unsnoozes expired notifications (snooze time has passed).
     func unsnoozeExpiredNotifications() throws -> Int {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let maximumDate = Date.distantFuture
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! <= now && !$0.isDeleted })
+            predicate: #Predicate { ($0.snoozedUntil ?? maximumDate) <= now && !$0.isDeleted })
 
         let expired = try self.modelContext.fetch(descriptor)
 

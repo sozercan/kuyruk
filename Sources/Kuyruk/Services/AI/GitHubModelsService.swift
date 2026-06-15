@@ -1,7 +1,7 @@
 import Foundation
 
 /// Types of AI analysis available for notifications.
-enum AnalysisType: String, CaseIterable, Sendable {
+enum AnalysisType: String, CaseIterable {
     case summary = "TL;DR"
     case threadSummary = "Thread Summary"
     case priority = "Priority"
@@ -35,6 +35,15 @@ enum AnalysisType: String, CaseIterable, Sendable {
     }
 }
 
+/// Minimal interface needed to prepare digest analyses without depending on the full service type.
+@MainActor
+protocol DigestPreparingModelsService: AnyObject {
+    var canGenerateSummaries: Bool { get }
+    var selectedModelId: String? { get }
+
+    func generateAnalysis(for notification: GitHubNotification, type: AnalysisType) async throws -> String
+}
+
 /// Service for interacting with the GitHub Models API.
 ///
 /// Provides functionality to:
@@ -45,7 +54,7 @@ enum AnalysisType: String, CaseIterable, Sendable {
 /// Uses the same OAuth token as the main GitHub API.
 @MainActor
 @Observable
-final class GitHubModelsService {
+final class GitHubModelsService: DigestPreparingModelsService {
     // MARK: - Types
 
     /// Chat completion request body.
@@ -262,8 +271,7 @@ final class GitHubModelsService {
         self.currentGenerationTask = task
 
         do {
-            let result = try await task.value
-            return result
+            return try await task.value
         } catch {
             // Clear task on error
             if self.currentNotificationId == notification.id {
@@ -326,8 +334,7 @@ final class GitHubModelsService {
         self.currentGenerationTask = task
 
         do {
-            let result = try await task.value
-            return result
+            return try await task.value
         } catch {
             // Clear task on error
             if self.currentNotificationId == notification.id, self.currentAnalysisType == type {

@@ -87,7 +87,6 @@ struct CommandPalette: View {
 
     // MARK: - Subviews
 
-    @ViewBuilder
     private var searchField: some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
@@ -164,7 +163,7 @@ struct CommandPalette: View {
             title: "Go to Inbox",
             icon: "tray",
             shortcut: "⌘1") {
-                self.viewModel.selectedFilter = .inbox
+                self.viewModel.selectFilter(.inbox)
                 self.dismiss()
             })
 
@@ -173,7 +172,7 @@ struct CommandPalette: View {
             title: "Go to Unread",
             icon: "circle.fill",
             shortcut: "⌘2") {
-                self.viewModel.selectedFilter = .unread
+                self.viewModel.selectFilter(.unread)
                 self.dismiss()
             })
 
@@ -182,7 +181,7 @@ struct CommandPalette: View {
             title: "Go to Mentioned",
             icon: "at",
             shortcut: "⌘3") {
-                self.viewModel.selectedFilter = .mentioned
+                self.viewModel.selectFilter(.mentioned)
                 self.dismiss()
             })
 
@@ -191,7 +190,7 @@ struct CommandPalette: View {
             title: "Go to Review Requested",
             icon: "eye",
             shortcut: "⌘4") {
-                self.viewModel.selectedFilter = .reviewRequested
+                self.viewModel.selectFilter(.reviewRequested)
                 self.dismiss()
             })
 
@@ -200,7 +199,16 @@ struct CommandPalette: View {
             title: "Go to Assigned",
             icon: "person.badge.plus",
             shortcut: "⌘5") {
-                self.viewModel.selectedFilter = .assigned
+                self.viewModel.selectFilter(.assigned)
+                self.dismiss()
+            })
+
+        commands.append(PaletteCommand(
+            id: "nav-digest",
+            title: "Go to Digest",
+            subtitle: "Open the digest view",
+            icon: AppDestination.digest.iconName) {
+                self.viewModel.showDigest()
                 self.dismiss()
             })
 
@@ -229,7 +237,8 @@ struct CommandPalette: View {
             })
 
         // Selected notification actions
-        if let selected = viewModel.selectedNotification {
+        if self.viewModel.appDestination == .notifications,
+           let selected = self.viewModel.selectedNotification {
             commands.append(PaletteCommand(
                 id: "action-open",
                 title: "Open in Browser",
@@ -276,7 +285,7 @@ struct CommandPalette: View {
                 title: repo.name,
                 subtitle: "Repository: \(repo.fullName)",
                 icon: "folder") {
-                    self.viewModel.selectedFilter = .repository(repo)
+                    self.viewModel.selectRepository(repo)
                     self.dismiss()
                 })
         }

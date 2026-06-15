@@ -34,7 +34,6 @@ struct NotificationDetailView: View {
 
     // MARK: - Empty State
 
-    @ViewBuilder
     private var emptyState: some View {
         ContentUnavailableView {
             Label("Select a Notification", systemImage: "bell")
@@ -45,7 +44,6 @@ struct NotificationDetailView: View {
 
     // MARK: - Detail Content
 
-    @ViewBuilder
     private func detailContent(for notification: GitHubNotification) -> some View {
         ScrollView {
             if #available(macOS 26, *) {
@@ -85,7 +83,6 @@ struct NotificationDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func detailSections(for notification: GitHubNotification) -> some View {
         VStack(spacing: 24) {
             // Header
@@ -113,7 +110,6 @@ struct NotificationDetailView: View {
 
     // MARK: - Header Section
 
-    @ViewBuilder
     private func headerSection(for notification: GitHubNotification) -> some View {
         VStack(spacing: 16) {
             // Subject type icon
@@ -142,7 +138,6 @@ struct NotificationDetailView: View {
 
     // MARK: - Info Section
 
-    @ViewBuilder
     private func infoSection(for notification: GitHubNotification) -> some View {
         // Note: Already inside GlassEffectContainer from detailContent,
         // so use regular background instead of glassEffect to avoid glass-on-glass
@@ -150,7 +145,6 @@ struct NotificationDetailView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
     private func infoGrid(for notification: GitHubNotification) -> some View {
         VStack(spacing: 12) {
             self.infoRow(label: "Status", value: notification.unread ? "Unread" : "Read")
@@ -168,7 +162,6 @@ struct NotificationDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
     private func infoRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
@@ -185,7 +178,6 @@ struct NotificationDetailView: View {
 
     // MARK: - Actions Section
 
-    @ViewBuilder
     private func actionsSection(for notification: GitHubNotification) -> some View {
         VStack(spacing: 12) {
             // Primary actions row
@@ -253,7 +245,6 @@ struct NotificationDetailView: View {
 
     // MARK: - AI Analysis Section
 
-    @ViewBuilder
     private func aiAnalysisSection(for notification: GitHubNotification) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
@@ -272,35 +263,39 @@ struct NotificationDetailView: View {
                 // Analysis rows
                 VStack(spacing: 12) {
                     self.analysisRow(
-                        title: "TL;DR",
-                        icon: "text.quote",
-                        value: self.generatedSummary,
-                        isLoading: self.loadingAnalysis == .summary,
-                        type: .summary,
+                        .init(
+                            title: "TL;DR",
+                            icon: "text.quote",
+                            value: self.generatedSummary,
+                            isLoading: self.loadingAnalysis == .summary,
+                            type: .summary),
                         notification: notification)
 
                     self.analysisRow(
-                        title: "Thread Status",
-                        icon: "bubble.left.and.bubble.right",
-                        value: self.threadSummary,
-                        isLoading: self.loadingAnalysis == .threadSummary,
-                        type: .threadSummary,
+                        .init(
+                            title: "Thread Status",
+                            icon: "bubble.left.and.bubble.right",
+                            value: self.threadSummary,
+                            isLoading: self.loadingAnalysis == .threadSummary,
+                            type: .threadSummary),
                         notification: notification)
 
                     self.analysisRow(
-                        title: "Priority",
-                        icon: "flag",
-                        value: self.formattedPriority,
-                        isLoading: self.loadingAnalysis == .priority,
-                        type: .priority,
+                        .init(
+                            title: "Priority",
+                            icon: "flag",
+                            value: self.formattedPriority,
+                            isLoading: self.loadingAnalysis == .priority,
+                            type: .priority),
                         notification: notification)
 
                     self.analysisRow(
-                        title: "Recommended Action",
-                        icon: "hand.point.right",
-                        value: self.actionRecommendation,
-                        isLoading: self.loadingAnalysis == .action,
-                        type: .action,
+                        .init(
+                            title: "Recommended Action",
+                            icon: "hand.point.right",
+                            value: self.actionRecommendation,
+                            isLoading: self.loadingAnalysis == .action,
+                            type: .action),
                         notification: notification)
 
                     // Error display
@@ -359,27 +354,30 @@ struct NotificationDetailView: View {
 
     // MARK: - Analysis Row
 
-    @ViewBuilder
+    private struct AnalysisRowContent {
+        let title: String
+        let icon: String
+        let value: String?
+        let isLoading: Bool
+        let type: AnalysisType
+    }
+
     private func analysisRow(
-        title: String,
-        icon: String,
-        value: String?,
-        isLoading: Bool,
-        type: AnalysisType,
+        _ content: AnalysisRowContent,
         notification: GitHubNotification) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
+                Image(systemName: content.icon)
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
 
-                Text(title)
+                Text(content.title)
                     .font(.subheadline)
                     .fontWeight(.medium)
 
                 Spacer()
 
-                if isLoading {
+                if content.isLoading {
                     ProgressView()
                         .controlSize(.small)
 
@@ -389,9 +387,9 @@ struct NotificationDetailView: View {
                     }
                     .buttonStyle(.borderless)
                     .font(.caption)
-                } else if value == nil {
+                } else if content.value == nil {
                     Button {
-                        Task { await self.generateAnalysis(for: notification, type: type) }
+                        Task { await self.generateAnalysis(for: notification, type: content.type) }
                     } label: {
                         Label("Generate", systemImage: "sparkle")
                     }
@@ -400,8 +398,8 @@ struct NotificationDetailView: View {
                 }
             }
 
-            if let value {
-                self.analysisValueView(value: value, type: type)
+            if let value = content.value {
+                self.analysisValueView(value: value, type: content.type)
             }
         }
         .padding()
@@ -421,7 +419,6 @@ struct NotificationDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func priorityBadgeView(value: String) -> some View {
         HStack(spacing: 8) {
             // Priority badge
@@ -468,7 +465,6 @@ struct NotificationDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func analysisErrorView(error: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -525,7 +521,6 @@ struct NotificationDetailView: View {
         }
     }
 
-    @ViewBuilder
     private var aiDisabledView: some View {
         // Note: Inside GlassEffectContainer, use regular background to avoid glass-on-glass
         HStack(spacing: 12) {
@@ -555,7 +550,6 @@ struct NotificationDetailView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
     private var aiNotConfiguredView: some View {
         HStack(spacing: 12) {
             Image(systemName: "gearshape")
@@ -584,7 +578,6 @@ struct NotificationDetailView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
     private var rateLimitedView: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")

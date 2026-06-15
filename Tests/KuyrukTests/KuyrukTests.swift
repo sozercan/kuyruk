@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-
 @testable import Kuyruk
 
 // MARK: - Test Helpers
@@ -58,10 +57,9 @@ extension KuyrukTests {
 
 // MARK: - Notification Filter Tests
 
-@Suite("Notification Filter Tests")
 struct KuyrukTests {
-    @Test("Notification filter matches correctly")
-    func notificationFilterMatches() {
+    @Test
+    func `Notification filter matches correctly`() {
         let notification = KuyrukTests.makeNotification(reason: .assign, unread: true)
 
         // Test filter matching
@@ -72,8 +70,8 @@ struct KuyrukTests {
         #expect(!NotificationFilter.reviewRequested.matches(notification))
     }
 
-    @Test("Unread filter excludes read notifications")
-    func unreadFilterExcludesRead() {
+    @Test
+    func `Unread filter excludes read notifications`() {
         let readNotification = KuyrukTests.makeNotification(unread: false)
         let unreadNotification = KuyrukTests.makeNotification(unread: true)
 
@@ -81,8 +79,8 @@ struct KuyrukTests {
         #expect(NotificationFilter.unread.matches(unreadNotification))
     }
 
-    @Test("Inbox filter matches only unread notifications (like GitHub default)")
-    func inboxFilterMatchesUnread() {
+    @Test
+    func `Inbox filter matches only unread notifications (like GitHub default)`() {
         let readNotification = KuyrukTests.makeNotification(unread: false)
         let unreadNotification = KuyrukTests.makeNotification(unread: true)
 
@@ -91,8 +89,8 @@ struct KuyrukTests {
         #expect(NotificationFilter.inbox.matches(unreadNotification))
     }
 
-    @Test("Mention filter matches mention reason")
-    func mentionFilterMatchesMentions() {
+    @Test
+    func `Mention filter matches mention reason`() {
         let mentionNotification = KuyrukTests.makeNotification(reason: .mention)
         let assignNotification = KuyrukTests.makeNotification(reason: .assign)
         let teamMentionNotification = KuyrukTests.makeNotification(reason: .teamMention)
@@ -102,8 +100,8 @@ struct KuyrukTests {
         #expect(!NotificationFilter.mentioned.matches(assignNotification))
     }
 
-    @Test("Review requested filter matches review_requested reason")
-    func reviewRequestedFilterMatches() {
+    @Test
+    func `Review requested filter matches review_requested reason`() {
         let reviewNotification = KuyrukTests.makeNotification(reason: .reviewRequested)
         let assignNotification = KuyrukTests.makeNotification(reason: .assign)
 
@@ -114,27 +112,28 @@ struct KuyrukTests {
 
 // MARK: - Notification Reason Tests
 
-@Suite("Notification Reason Tests")
 struct NotificationReasonTests {
-    @Test("Notification reason has correct display name")
-    func notificationReasonDisplayName() {
+    @Test
+    func `Notification reason has correct display name`() {
         #expect(NotificationReason.assign.displayName == "Assigned")
         #expect(NotificationReason.reviewRequested.displayName == "Review Requested")
         #expect(NotificationReason.mention.displayName == "Mentioned")
         #expect(NotificationReason.author.displayName == "Author")
         #expect(NotificationReason.ciActivity.displayName == "CI Activity")
+        #expect(NotificationReason.securityAlert.displayName == "Security Alert")
         #expect(NotificationReason.teamMention.displayName == "Team Mention")
     }
 
-    @Test("Notification reason has correct icon")
-    func notificationReasonIcon() {
+    @Test
+    func `Notification reason has correct icon`() {
         #expect(NotificationReason.assign.iconName == "person.badge.plus")
         #expect(NotificationReason.mention.iconName == "at")
         #expect(NotificationReason.reviewRequested.iconName == "eye")
+        #expect(NotificationReason.securityAlert.iconName == "shield.lefthalf.filled")
     }
 
-    @Test("Known notification reasons are decodable")
-    func knownReasonsDecodable() throws {
+    @Test
+    func `Known notification reasons are decodable`() throws {
         let reasons = [
             ("assign", NotificationReason.assign),
             ("author", NotificationReason.author),
@@ -142,40 +141,169 @@ struct NotificationReasonTests {
             ("ci_activity", NotificationReason.ciActivity),
             ("mention", NotificationReason.mention),
             ("review_requested", NotificationReason.reviewRequested),
+            ("security_alert", NotificationReason.securityAlert),
             ("team_mention", NotificationReason.teamMention),
         ]
 
         for (jsonValue, expected) in reasons {
             let json = "\"\(jsonValue)\""
-            let data = json.data(using: .utf8)!
+            let data = try #require(json.data(using: .utf8))
             let decoded = try JSONDecoder().decode(NotificationReason.self, from: data)
             #expect(decoded == expected)
         }
     }
 
-    @Test("Unknown reasons decode to unknown case")
-    func unknownReasonsDecodesToUnknown() throws {
+    @Test
+    func `Unknown reasons decode to unknown case`() throws {
         let json = "\"some_new_reason\""
-        let data = json.data(using: .utf8)!
+        let data = try #require(json.data(using: .utf8))
         let decoded = try JSONDecoder().decode(NotificationReason.self, from: data)
         #expect(decoded == .unknown)
     }
 }
 
+// MARK: - App Destination Tests
+
+struct AppDestinationTests {
+    @Test
+    func `App destination has correct metadata`() {
+        #expect(AppDestination.allCases == [.notifications, .digest])
+        #expect(AppDestination.notifications.displayName == "Notifications")
+        #expect(AppDestination.notifications.iconName == "tray")
+        #expect(AppDestination.digest.displayName == "Digest")
+        #expect(AppDestination.digest.iconName == "newspaper")
+    }
+}
+
+// MARK: - Notifications ViewModel Navigation Tests
+
+@Suite(.serialized)
+@MainActor
+struct NotificationsViewModelNavigationTests {
+    @Test
+    func `Selecting a filter returns to notifications destination`() throws {
+        let viewModel = try self.makeViewModel()
+
+        viewModel.showDigest()
+        viewModel.selectFilter(.mentioned)
+
+        #expect(viewModel.appDestination == .notifications)
+        #expect(viewModel.selectedFilter == .mentioned)
+    }
+
+    @Test
+    func `Showing notifications preserves the current filter`() throws {
+        let viewModel = try self.makeViewModel()
+
+        viewModel.selectFilter(.reviewRequested)
+        viewModel.showDigest()
+        viewModel.showNotifications()
+
+        #expect(viewModel.appDestination == .notifications)
+        #expect(viewModel.selectedFilter == .reviewRequested)
+    }
+
+    @Test
+    func `Showing a notification returns to notifications destination`() throws {
+        let viewModel = try self.makeViewModel()
+        let notification = KuyrukTests.makeNotification(reason: .assign)
+
+        viewModel.selectFilter(.assigned)
+        viewModel.showDigest()
+        viewModel.showNotification(notification)
+
+        #expect(viewModel.appDestination == .notifications)
+        #expect(viewModel.selectedFilter == .assigned)
+        #expect(viewModel.selectedNotification?.id == notification.id)
+    }
+
+    @Test
+    func `Showing a notification switches to its repository when the current filter does not match`() throws {
+        let viewModel = try self.makeViewModel()
+        let repository = KuyrukTests.makeRepository(id: 42, name: "digest", owner: "sozer")
+        let notification = KuyrukTests.makeNotification(
+            id: "digest-thread",
+            reason: .assign,
+            repository: repository)
+
+        viewModel.selectFilter(.mentioned)
+        viewModel.showDigest()
+        viewModel.showNotification(notification)
+
+        #expect(viewModel.appDestination == .notifications)
+        #expect(viewModel.selectedFilter == .repository(repository))
+        #expect(viewModel.selectedNotification?.id == notification.id)
+    }
+
+    @Test
+    func `Selecting a repository returns to notifications destination`() throws {
+        let viewModel = try self.makeViewModel()
+        let repository = KuyrukTests.makeRepository(id: 88, name: "activity", owner: "sozer")
+
+        viewModel.showDigest()
+        viewModel.selectRepository(repository)
+
+        #expect(viewModel.appDestination == .notifications)
+        #expect(viewModel.selectedFilter == .repository(repository))
+    }
+
+    private func makeViewModel() throws -> NotificationsViewModel {
+        let dataStore = try DataStore(inMemory: true)
+        let authService = AuthService()
+        let gitHubClient = GitHubClient(authService: authService)
+        let syncService = SyncService(gitHubClient: gitHubClient, dataStore: dataStore)
+
+        return NotificationsViewModel(
+            gitHubClient: gitHubClient,
+            dataStore: dataStore,
+            syncService: syncService)
+    }
+}
+
+// MARK: - Notifications ViewModel Merge Tests
+
+struct NotificationsViewModelMergeTests {
+    @Test
+    func `Merge preserves local read state while thread is still returned by API`() {
+        let localReadNotification = KuyrukTests.makeNotification(id: "thread-1", unread: false)
+        let serverUnreadNotification = KuyrukTests.makeNotification(id: "thread-1", unread: true)
+
+        let merged = NotificationsViewModel.mergedNotifications(
+            existing: [localReadNotification],
+            fresh: [serverUnreadNotification])
+
+        #expect(merged.count == 1)
+        #expect(merged.first?.id == localReadNotification.id)
+        #expect(merged.first?.unread == false)
+    }
+
+    @Test
+    func `Merge drops local read notifications that no longer exist in API results`() {
+        let localReadNotification = KuyrukTests.makeNotification(id: "thread-1", unread: false)
+        let currentUnreadNotification = KuyrukTests.makeNotification(id: "thread-2", unread: true)
+
+        let merged = NotificationsViewModel.mergedNotifications(
+            existing: [localReadNotification, currentUnreadNotification],
+            fresh: [currentUnreadNotification])
+
+        #expect(merged.count == 1)
+        #expect(merged.first?.id == currentUnreadNotification.id)
+    }
+}
+
 // MARK: - Subject Type Tests
 
-@Suite("Subject Type Tests")
 struct SubjectTypeTests {
-    @Test("Subject type has correct icon")
-    func subjectTypeIcon() {
+    @Test
+    func `Subject type has correct icon`() {
         #expect(SubjectType.issue.iconName == "circle.dotted")
         #expect(SubjectType.pullRequest.iconName == "arrow.triangle.merge")
         #expect(SubjectType.release.iconName == "tag")
         #expect(SubjectType.discussion.iconName == "bubble.left.and.bubble.right")
     }
 
-    @Test("Subject type decodes from API values")
-    func subjectTypeDecoding() throws {
+    @Test
+    func `Subject type decodes from API values`() throws {
         let types = [
             ("Issue", SubjectType.issue),
             ("PullRequest", SubjectType.pullRequest),
@@ -187,14 +315,14 @@ struct SubjectTypeTests {
 
         for (jsonValue, expected) in types {
             let json = "\"\(jsonValue)\""
-            let data = json.data(using: .utf8)!
+            let data = try #require(json.data(using: .utf8))
             let decoded = try JSONDecoder().decode(SubjectType.self, from: data)
             #expect(decoded == expected)
         }
     }
 
-    @Test("Subject type display name is correct")
-    func subjectTypeDisplayName() {
+    @Test
+    func `Subject type display name is correct`() {
         #expect(SubjectType.issue.displayName == "Issue")
         #expect(SubjectType.pullRequest.displayName == "Pull Request")
         #expect(SubjectType.release.displayName == "Release")
@@ -203,16 +331,15 @@ struct SubjectTypeTests {
 
 // MARK: - Repository Tests
 
-@Suite("Repository Tests")
 struct RepositoryTests {
-    @Test("Repository fullName is correct")
-    func repositoryFullName() {
+    @Test
+    func `Repository fullName is correct`() {
         let repo = KuyrukTests.makeRepository(name: "my-app", owner: "acme")
         #expect(repo.fullName == "acme/my-app")
     }
 
-    @Test("Repository is Hashable")
-    func repositoryHashable() {
+    @Test
+    func `Repository is Hashable`() {
         let repo1 = KuyrukTests.makeRepository(id: 1, name: "repo-a")
         let repo2 = KuyrukTests.makeRepository(id: 1, name: "repo-a")
         let repo3 = KuyrukTests.makeRepository(id: 2, name: "repo-b")
@@ -231,17 +358,16 @@ struct RepositoryTests {
 
 // MARK: - GitHubNotification Tests
 
-@Suite("GitHubNotification Tests")
 struct GitHubNotificationTests {
-    @Test("Notification webUrl is constructed correctly for issues")
-    func notificationWebUrlIssue() {
+    @Test
+    func `Notification webUrl is constructed correctly for issues`() {
         let notification = KuyrukTests.makeNotification(type: .issue)
         let expectedUrl = "https://github.com/owner/test-repo/issues/1"
         #expect(notification.webUrl?.absoluteString == expectedUrl)
     }
 
-    @Test("Notification webUrl is constructed correctly for PRs")
-    func notificationWebUrlPR() {
+    @Test
+    func `Notification webUrl is constructed correctly for PRs`() {
         let repo = KuyrukTests.makeRepository()
         let subject = NotificationSubject(
             title: "Test PR",
@@ -264,14 +390,14 @@ struct GitHubNotificationTests {
         #expect(notification.webUrl?.absoluteString == expectedUrl)
     }
 
-    @Test("Notification is Identifiable")
-    func notificationIdentifiable() {
+    @Test
+    func `Notification is Identifiable`() {
         let notification = KuyrukTests.makeNotification(id: "unique-123")
         #expect(notification.id == "unique-123")
     }
 
-    @Test("Notifications with same ID are identifiable")
-    func notificationIdentifiableByID() {
+    @Test
+    func `Notifications with same ID are identifiable`() {
         let notification1 = KuyrukTests.makeNotification(id: "same-id")
         let notification2 = KuyrukTests.makeNotification(id: "same-id")
         let notification3 = KuyrukTests.makeNotification(id: "different-id")
@@ -286,10 +412,9 @@ struct GitHubNotificationTests {
 
 // MARK: - Auth State Tests
 
-@Suite("Auth State Tests")
 struct AuthStateTests {
-    @Test("Auth state isAuthenticated is correct")
-    func authStateIsAuthenticated() {
+    @Test
+    func `Auth state isAuthenticated is correct`() {
         #expect(!AuthState.unknown.isAuthenticated)
         #expect(!AuthState.unauthenticated.isAuthenticated)
         #expect(!AuthState.requestingDeviceCode.isAuthenticated)
@@ -297,8 +422,8 @@ struct AuthStateTests {
         #expect(!AuthState.error("Some error").isAuthenticated)
     }
 
-    @Test("Auth state accessToken returns token when authenticated")
-    func authStateAccessToken() {
+    @Test
+    func `Auth state accessToken returns token when authenticated`() {
         let authenticatedState = AuthState.authenticated("my-token")
         #expect(authenticatedState.accessToken == "my-token")
 
@@ -309,8 +434,8 @@ struct AuthStateTests {
         #expect(errorState.accessToken == nil)
     }
 
-    @Test("Auth state is Equatable")
-    func authStateEquatable() {
+    @Test
+    func `Auth state is Equatable`() {
         #expect(AuthState.unknown == AuthState.unknown)
         #expect(AuthState.authenticated("a") == AuthState.authenticated("a"))
         #expect(AuthState.authenticated("a") != AuthState.authenticated("b"))
@@ -320,10 +445,9 @@ struct AuthStateTests {
 
 // MARK: - Keychain Error Tests
 
-@Suite("Keychain Error Tests")
 struct KeychainErrorTests {
-    @Test("Keychain error has correct error descriptions")
-    func keychainErrorDescriptions() {
+    @Test
+    func `Keychain error has correct error descriptions`() throws {
         let errors: [KeychainError] = [
             .encodingFailed,
             .decodingFailed,
@@ -333,13 +457,13 @@ struct KeychainErrorTests {
         ]
 
         for error in errors {
-            #expect(error.errorDescription != nil)
-            #expect(!error.errorDescription!.isEmpty)
+            let description = try #require(error.errorDescription)
+            #expect(!description.isEmpty)
         }
     }
 
-    @Test("Keychain save error includes status code")
-    func keychainSaveErrorIncludesStatus() {
+    @Test
+    func `Keychain save error includes status code`() {
         let error = KeychainError.saveFailed(-25300)
         #expect(error.errorDescription?.contains("-25300") == true)
     }

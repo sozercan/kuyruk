@@ -2,7 +2,7 @@ import Foundation
 
 /// Represents the reason why a user received a GitHub notification.
 /// Maps to GitHub API's `reason` field.
-enum NotificationReason: String, Codable, Sendable, CaseIterable, Identifiable {
+enum NotificationReason: String, Codable, CaseIterable, Identifiable {
     /// You were assigned to the issue/PR
     case assign
 
@@ -14,6 +14,9 @@ enum NotificationReason: String, Codable, Sendable, CaseIterable, Identifiable {
 
     /// A GitHub Actions workflow run was triggered for your repository
     case ciActivity = "ci_activity"
+
+    /// GitHub detected a security alert that needs attention
+    case securityAlert = "security_alert"
 
     /// You accepted an invitation to contribute to the repository
     case invitation
@@ -39,7 +42,9 @@ enum NotificationReason: String, Codable, Sendable, CaseIterable, Identifiable {
     /// Unknown reason (fallback for API changes)
     case unknown
 
-    var id: String { self.rawValue }
+    var id: String {
+        self.rawValue
+    }
 
     /// Human-readable display name
     var displayName: String {
@@ -52,6 +57,8 @@ enum NotificationReason: String, Codable, Sendable, CaseIterable, Identifiable {
             "Comment"
         case .ciActivity:
             "CI Activity"
+        case .securityAlert:
+            "Security Alert"
         case .invitation:
             "Invitation"
         case .manual:
@@ -82,6 +89,8 @@ enum NotificationReason: String, Codable, Sendable, CaseIterable, Identifiable {
             "bubble.left"
         case .ciActivity:
             "gearshape.2"
+        case .securityAlert:
+            "shield.lefthalf.filled"
         case .invitation:
             "envelope"
         case .manual:
