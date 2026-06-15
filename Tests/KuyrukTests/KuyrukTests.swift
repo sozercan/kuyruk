@@ -34,6 +34,7 @@ extension KuyrukTests {
         reason: NotificationReason = .assign,
         unread: Bool = true,
         type: SubjectType = .issue,
+        updatedAt: Date = Date(),
         repository: Repository? = nil) -> GitHubNotification {
         let repo = repository ?? self.makeRepository()
         let subject = NotificationSubject(
@@ -48,7 +49,7 @@ extension KuyrukTests {
             subject: subject,
             reason: reason,
             unread: unread,
-            updatedAt: Date(),
+            updatedAt: updatedAt,
             lastReadAt: nil,
             url: "https://api.github.com/notifications/threads/\(id)",
             subscriptionUrl: "https://api.github.com/notifications/threads/\(id)/subscription")
@@ -288,6 +289,150 @@ struct NotificationsViewModelMergeTests {
 
         #expect(merged.count == 1)
         #expect(merged.first?.id == currentUnreadNotification.id)
+    }
+}
+
+// MARK: - Digest Snapshot Ranking Tests
+
+@MainActor
+struct DigestSnapshotRankingTests {
+    @Test
+    func `Ranking places action recommendations ahead of summary-only items`() {
+        let withAction = Self.makeSummaryItem(id: "a", priorityScore: "low", actionRecommendation: "Review now")
+        let summaryOnly = Self.makeSummaryItem(id: "b", priorityScore: "high", actionRecommendation: nil)
+
+        // Action guidance wins even when the summary-only item has a higher priority score.
+        #expect(DigestSnapshot.areRankedDescending(withAction, summaryOnly))
+        #expect(!DigestSnapshot.areRankedDescending(summaryOnly, withAction))
+    }
+
+    @Test
+    func `Ranking orders by priority when action flag is equal`() {
+        let high = Self.makeSummaryItem(id: "a", priorityScore: "High", actionRecommendation: nil)
+        let medium = Self.makeSummaryItem(id: "b", priorityScore: "medium", actionRecommendation: nil)
+        let low = Self.makeSummaryItem(id: "c", priorityScore: "low", actionRecommendation: nil)
+        let none = Self.makeSummaryItem(id: "d", priorityScore: nil, actionRecommendation: nil)
+
+        let sorted = [none, low, high, medium].sorted(by: DigestSnapshot.areRankedDescending)
+
+        #expect(sorted.map(\.id) == ["a", "b", "c", "d"])
+    }
+
+    @Test
+    func `Ranking falls back to recency then identifier`() {
+        let older = Date(timeIntervalSince1970: 1000)
+        let newer = Date(timeIntervalSince1970: 2000)
+
+        let fresher = Self.makeSummaryItem(
+            id: "z",
+            priorityScore: "medium",
+            actionRecommendation: nil,
+            updatedAt: newer)
+        let staler = Self.makeSummaryItem(
+            id: "a",
+            priorityScore: "medium",
+            actionRecommendation: nil,
+            updatedAt: older)
+
+        // Fresher activity wins despite a higher identifier.
+        #expect(DigestSnapshot.areRankedDescending(fresher, staler))
+
+        let sameTimeA = Self.makeSummaryItem(
+            id: "a",
+            priorityScore: "medium",
+            actionRecommendation: nil,
+            updatedAt: newer)
+        let sameTimeB = Self.makeSummaryItem(
+            id: "b",
+            priorityScore: "medium",
+            actionRecommendation: nil,
+            updatedAt: newer)
+
+        // Tie on every other key falls back to the lower identifier.
+        #expect(DigestSnapshot.areRankedDescending(sameTimeA, sameTimeB))
+    }
+
+    @Test
+    func `Priority rank is case-insensitive and ordered`() {
+        #expect(DigestSnapshot.priorityRank("High") == 3)
+        #expect(DigestSnapshot.priorityRank("medium") == 2)
+        #expect(DigestSnapshot.priorityRank("  low ") == 1)
+        #expect(DigestSnapshot.priorityRank("not-a-score") == 0)
+        #expect(DigestSnapshot.priorityRank(nil) == 0)
+        #expect(DigestSnapshot.priorityRank("HIGH") > DigestSnapshot.priorityRank("LOW"))
+    }
+
+    @Test
+    func `Repository activity orders by unread load first`() {
+        let heavy = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 1, name: "heavy"),
+            unreadCount: 5,
+            latestUpdatedAt: Date(timeIntervalSince1970: 1000))
+        let light = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 2, name: "light"),
+            unreadCount: 1,
+            latestUpdatedAt: Date(timeIntervalSince1970: 5000))
+
+        let sorted = [light, heavy].sorted(by: DigestSnapshot.repositoryActivityOrder)
+
+        // Higher unread load wins even though the lighter repo has fresher activity.
+        #expect(sorted.map(\.repository.id) == [1, 2])
+    }
+
+    @Test
+    func `Repository activity breaks unread ties by recency then name`() {
+        let older = Date(timeIntervalSince1970: 1000)
+        let newer = Date(timeIntervalSince1970: 2000)
+
+        let fresher = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 1, name: "zzz", owner: "octo"),
+            unreadCount: 3,
+            latestUpdatedAt: newer)
+        let staler = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 2, name: "aaa", owner: "octo"),
+            unreadCount: 3,
+            latestUpdatedAt: older)
+
+        // Recency beats name when unread counts tie.
+        #expect(DigestSnapshot.repositoryActivityOrder(fresher, staler))
+
+        let aaa = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 3, name: "aaa", owner: "octo"),
+            unreadCount: 3,
+            latestUpdatedAt: newer)
+        let bbb = Self.makeActivity(
+            repository: KuyrukTests.makeRepository(id: 4, name: "bbb", owner: "octo"),
+            unreadCount: 3,
+            latestUpdatedAt: newer)
+
+        // Full tie on unread and recency falls back to ascending full name.
+        #expect(DigestSnapshot.repositoryActivityOrder(aaa, bbb))
+    }
+
+    private static func makeSummaryItem(
+        id: String,
+        priorityScore: String?,
+        actionRecommendation: String?,
+        updatedAt: Date = Date(timeIntervalSince1970: 1000)) -> DigestSummaryItem {
+        DigestSummaryItem(
+            notification: KuyrukTests.makeNotification(id: id, type: .pullRequest, updatedAt: updatedAt),
+            summaryText: "Summary for \(id)",
+            priorityScore: priorityScore,
+            priorityExplanation: nil,
+            actionRecommendation: actionRecommendation)
+    }
+
+    private static func makeActivity(
+        repository: Repository,
+        unreadCount: Int,
+        latestUpdatedAt: Date) -> DigestRepositoryActivity {
+        DigestRepositoryActivity(
+            repository: repository,
+            unreadCount: unreadCount,
+            totalCount: unreadCount,
+            summaryCount: 0,
+            latestNotification: KuyrukTests.makeNotification(id: "\(repository.id)", repository: repository),
+            latestUpdatedAt: latestUpdatedAt)
     }
 }
 

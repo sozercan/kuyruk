@@ -455,17 +455,7 @@ struct DigestSnapshot {
                         latestNotification: latestNotification,
                         latestUpdatedAt: latestNotification.updatedAt)
                 }
-                .sorted { lhs, rhs in
-                    if lhs.unreadCount != rhs.unreadCount {
-                        return lhs.unreadCount > rhs.unreadCount
-                    }
-
-                    if lhs.latestUpdatedAt != rhs.latestUpdatedAt {
-                        return lhs.latestUpdatedAt > rhs.latestUpdatedAt
-                    }
-
-                    return lhs.repository.fullName < rhs.repository.fullName
-                }
+                .sorted(by: Self.repositoryActivityOrder)
                 .prefix(8))
     }
 
@@ -500,7 +490,7 @@ struct DigestSnapshot {
         return nil
     }
 
-    private static func areRankedDescending(_ lhs: DigestSummaryItem, _ rhs: DigestSummaryItem) -> Bool {
+    static func areRankedDescending(_ lhs: DigestSummaryItem, _ rhs: DigestSummaryItem) -> Bool {
         if lhs.hasActionRecommendation != rhs.hasActionRecommendation {
             return lhs.hasActionRecommendation && !rhs.hasActionRecommendation
         }
@@ -519,6 +509,21 @@ struct DigestSnapshot {
         return lhs.notification.id < rhs.notification.id
     }
 
+    /// Orders repositories by unread load, then freshest activity, then name.
+    static func repositoryActivityOrder(
+        _ lhs: DigestRepositoryActivity,
+        _ rhs: DigestRepositoryActivity) -> Bool {
+        if lhs.unreadCount != rhs.unreadCount {
+            return lhs.unreadCount > rhs.unreadCount
+        }
+
+        if lhs.latestUpdatedAt != rhs.latestUpdatedAt {
+            return lhs.latestUpdatedAt > rhs.latestUpdatedAt
+        }
+
+        return lhs.repository.fullName < rhs.repository.fullName
+    }
+
     private static func count(
         for filter: NotificationFilter,
         in notifications: [GitHubNotification],
@@ -531,7 +536,7 @@ struct DigestSnapshot {
         }
     }
 
-    private static func priorityRank(_ score: String?) -> Int {
+    static func priorityRank(_ score: String?) -> Int {
         switch score?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "high":
             3
