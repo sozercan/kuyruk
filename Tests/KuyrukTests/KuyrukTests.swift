@@ -413,13 +413,15 @@ struct DigestSnapshotRankingTests {
         id: String,
         priorityScore: String?,
         actionRecommendation: String?,
-        updatedAt: Date = Date(timeIntervalSince1970: 1000)) -> DigestSummaryItem {
+        updatedAt: Date = Date(timeIntervalSince1970: 1000),
+        isActionable: Bool? = nil) -> DigestSummaryItem {
         DigestSummaryItem(
             notification: KuyrukTests.makeNotification(id: id, type: .pullRequest, updatedAt: updatedAt),
             summaryText: "Summary for \(id)",
             priorityScore: priorityScore,
             priorityExplanation: nil,
-            actionRecommendation: actionRecommendation)
+            actionRecommendation: actionRecommendation,
+            isActionable: isActionable ?? (actionRecommendation != nil))
     }
 
     private static func makeActivity(
@@ -433,6 +435,105 @@ struct DigestSnapshotRankingTests {
             summaryCount: 0,
             latestNotification: KuyrukTests.makeNotification(id: "\(repository.id)", repository: repository),
             latestUpdatedAt: latestUpdatedAt)
+    }
+}
+
+// MARK: - Digest Actionability Tests
+
+@MainActor
+struct DigestActionabilityTests {
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func daysAgo(_ days: Double) -> Date {
+        self.now.addingTimeInterval(-days * 24 * 60 * 60)
+    }
+
+    @Test
+    func `Affirmative action verdict is actionable`() {
+        #expect(DigestSnapshot.hasMeaningfulAction("Needs your review"))
+        #expect(DigestSnapshot.hasMeaningfulAction("**Please respond** to the maintainer"))
+        // Positive phrasing wins even when a negative token co-occurs.
+        #expect(DigestSnapshot.hasMeaningfulAction("Needs your review; no rush"))
+    }
+
+    @Test
+    func `FYI and no-action verdicts are not actionable`() {
+        #expect(!DigestSnapshot.hasMeaningfulAction("**Just FYI, no action needed**"))
+        #expect(!DigestSnapshot.hasMeaningfulAction("\"Just FYI, no action needed\""))
+        #expect(!DigestSnapshot.hasMeaningfulAction("No immediate action needed."))
+        #expect(!DigestSnapshot.hasMeaningfulAction("Nothing to do here."))
+        #expect(!DigestSnapshot.hasMeaningfulAction("Waiting on others."))
+        #expect(!DigestSnapshot.hasMeaningfulAction(nil))
+    }
+
+    @Test
+    func `Unknown phrasing fails open as actionable`() {
+        // No positive or negative signal -> kept, so a genuine ask is never hidden on phrasing alone.
+        #expect(DigestSnapshot.hasMeaningfulAction("Triage the flaky integration test."))
+    }
+
+    @Test
+    func `Release that is watched and FYI is not actionable`() {
+        // The reported case: release + Watching + "Just FYI, no action needed", 5 months old.
+        let actionable = DigestSnapshot.isActionable(
+            actionRecommendation: "Just FYI, no action needed",
+            subjectType: .release,
+            reason: .subscribed,
+            updatedAt: self.daysAgo(160),
+            now: self.now)
+        #expect(!actionable)
+    }
+
+    @Test
+    func `Stale low-signal item is dropped even with an action verdict`() {
+        let actionable = DigestSnapshot.isActionable(
+            actionRecommendation: "Take a look",
+            subjectType: .issue,
+            reason: .comment,
+            updatedAt: self.daysAgo(120),
+            now: self.now)
+        #expect(!actionable)
+    }
+
+    @Test
+    func `Recent actionable item is kept`() {
+        let actionable = DigestSnapshot.isActionable(
+            actionRecommendation: "Needs your response",
+            subjectType: .issue,
+            reason: .comment,
+            updatedAt: self.daysAgo(10),
+            now: self.now)
+        #expect(actionable)
+    }
+
+    @Test
+    func `High-signal reasons bypass staleness`() {
+        // A review request stays actionable even when old, so a real ask is never hidden by age.
+        let oldReview = DigestSnapshot.isActionable(
+            actionRecommendation: "Needs your review",
+            subjectType: .pullRequest,
+            reason: .reviewRequested,
+            updatedAt: self.daysAgo(200),
+            now: self.now)
+        #expect(oldReview)
+    }
+
+    @Test
+    func `High-signal reason still requires a meaningful action`() {
+        // Bypassing staleness must not bypass an explicit no-action verdict.
+        let fyiMention = DigestSnapshot.isActionable(
+            actionRecommendation: "Just FYI, no action needed",
+            subjectType: .issue,
+            reason: .mention,
+            updatedAt: self.daysAgo(5),
+            now: self.now)
+        #expect(!fyiMention)
+    }
+
+    @Test
+    func `Recency boundary is inclusive at the window edge`() {
+        #expect(DigestSnapshot.isRecentEnough(updatedAt: self.daysAgo(90), now: self.now))
+        #expect(!DigestSnapshot.isRecentEnough(updatedAt: self.daysAgo(91), now: self.now))
     }
 }
 

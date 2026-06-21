@@ -528,3 +528,120 @@ enum ServiceTestHelpers {
             subscriptionUrl: "https://api.github.com/notifications/threads/\(id)/subscription")
     }
 }
+
+// MARK: - Pull Request State Tests
+
+struct PullRequestStateResponseTests {
+    @Test
+    func `Merged pull request maps to merged status`() throws {
+        let json = #"{"state":"closed","merged":true,"draft":false}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .merged)
+        #expect(response.status.isResolved)
+        #expect(response.isDraft == false)
+    }
+
+    @Test
+    func `Closed unmerged pull request maps to closed status`() throws {
+        let json = #"{"state":"closed","merged":false}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .closed)
+        #expect(response.status.isResolved)
+    }
+
+    @Test
+    func `Open pull request maps to open status`() throws {
+        let json = #"{"state":"open","merged":false,"draft":true}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .open)
+        #expect(!response.status.isResolved)
+        #expect(response.isDraft)
+    }
+
+    @Test
+    func `Missing optional fields default safely`() throws {
+        let json = #"{"state":"open"}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .open)
+        #expect(response.isDraft == false)
+    }
+
+    @Test
+    func `Pull request status resolution flags are correct`() {
+        #expect(PullRequestStatus.open.isResolved == false)
+        #expect(PullRequestStatus.closed.isResolved)
+        #expect(PullRequestStatus.merged.isResolved)
+    }
+}
+
+@Suite(.serialized)
+@MainActor
+struct CachedPullRequestStateTests {
+    @Test
+    func `Cached state is valid until the notification updates`() {
+        let notification = ServiceTestHelpers.makeNotification(type: .pullRequest)
+        let cached = CachedPullRequestState(
+            notificationId: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            status: .merged,
+            isDraft: false)
+
+        #expect(cached.isValid(for: notification))
+        #expect(cached.status == .merged)
+        #expect(cached.isResolved)
+
+        // A newer notification invalidates the cached state.
+        let updated = ServiceTestHelpers.makeNotification(type: .pullRequest)
+        let newer = GitHubNotification(
+            id: updated.id,
+            repository: updated.repository,
+            subject: updated.subject,
+            reason: updated.reason,
+            unread: updated.unread,
+            updatedAt: cached.notificationUpdatedAt.addingTimeInterval(60),
+            lastReadAt: nil,
+            url: updated.url,
+            subscriptionUrl: updated.subscriptionUrl)
+
+        #expect(!cached.isValid(for: newer))
+    }
+
+    @Test
+    func `DataStore saves, fetches, and updates pull request state`() throws {
+        let store = try DataStore(inMemory: true)
+        let notification = ServiceTestHelpers.makeNotification(id: "pr-1", type: .pullRequest)
+
+        #expect(try store.fetchPullRequestState(for: "pr-1") == nil)
+
+        try store.savePullRequestState(.open, isDraft: false, for: notification)
+        let open = try store.fetchPullRequestState(for: "pr-1")
+        #expect(open?.status == .open)
+        #expect(open?.isResolved == false)
+
+        // Upsert updates the existing row rather than inserting a duplicate.
+        try store.savePullRequestState(.merged, isDraft: false, for: notification)
+        let merged = try store.fetchPullRequestState(for: "pr-1")
+        #expect(merged?.status == .merged)
+        #expect(merged?.isResolved == true)
+    }
+
+    @Test
+    func `Cleanup removes pull request states immediately when age is zero`() throws {
+        let store = try DataStore(inMemory: true)
+        let notification = ServiceTestHelpers.makeNotification(id: "pr-cleanup", type: .pullRequest)
+
+        try store.savePullRequestState(.merged, isDraft: false, for: notification)
+        #expect(try store.fetchPullRequestState(for: "pr-cleanup") != nil)
+
+        try store.cleanupOldPullRequestStates(olderThan: 0)
+        #expect(try store.fetchPullRequestState(for: "pr-cleanup") == nil)
+    }
+}

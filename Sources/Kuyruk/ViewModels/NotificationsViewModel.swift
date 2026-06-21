@@ -441,6 +441,13 @@ final class NotificationsViewModel {
         try? self.dataStore.fetchSummary(for: notification.id)
     }
 
+    /// Fetch the cached pull request resolution state for a notification.
+    /// - Parameter notification: The notification to look up.
+    /// - Returns: The cached pull request state if available, nil otherwise.
+    func cachedPullRequestState(for notification: GitHubNotification) -> CachedPullRequestState? {
+        try? self.dataStore.fetchPullRequestState(for: notification.id)
+    }
+
     /// Invalidate all cached summaries (e.g., when clearing cache).
     /// This removes all cached AI-generated summaries from the store.
     func invalidateSummaryCache() {
@@ -489,6 +496,17 @@ final class NotificationsViewModel {
                 try Task.checkCancellation()
                 guard self.digestPreparationRunID == runID else { return }
 
+                // Resolve PR state first; skip AI evaluation for merged/closed PRs.
+                let status = await self.ensurePullRequestState(for: notification)
+
+                guard self.digestPreparationRunID == runID else { return }
+
+                if status?.isResolved == true {
+                    self.digestPendingPRAnalysisCount = max(0, self.digestPendingPRAnalysisCount - 1)
+                    self.digestEvaluatedPRCount += 1
+                    continue
+                }
+
                 let missingTypes = self.missingDigestAnalysisTypes(for: notification)
                 var generatedAnalysis = false
 
@@ -534,6 +552,47 @@ final class NotificationsViewModel {
 
     private func pullRequestNotificationsForDigest() -> [GitHubNotification] {
         self.notifications.filter { $0.subject.type == .pullRequest }
+    }
+
+    /// Returns the pull request's resolution status, using a valid cached value when
+    /// available and otherwise fetching and caching it.
+    ///
+    /// Fails open: any error (or a non-pull-request notification) returns `nil`, so the
+    /// caller treats the PR as unresolved and current behavior is preserved.
+    private func ensurePullRequestState(for notification: GitHubNotification) async -> PullRequestStatus? {
+        guard notification.subject.type == .pullRequest else { return nil }
+
+        if let cached = self.cachedPullRequestState(for: notification),
+           cached.isValid(for: notification) {
+            return cached.status
+        }
+
+        guard let number = notification.subjectNumber else { return nil }
+        let owner = notification.repository.owner.login
+        let repo = notification.repository.name
+
+        guard !owner.isEmpty, !repo.isEmpty else { return nil }
+
+        do {
+            let response = try await self.gitHubClient.fetchPullRequestState(
+                owner: owner,
+                repo: repo,
+                number: number)
+            let status = response.status
+
+            try self.dataStore.savePullRequestState(
+                status,
+                isDraft: response.isDraft,
+                for: notification)
+            self.digestAnalysisRevision += 1
+            return status
+        } catch {
+            DiagnosticsLogger.error(
+                error,
+                context: "ensurePullRequestState \(notification.id)",
+                category: .ui)
+            return nil
+        }
     }
 
     private func missingDigestAnalysisTypes(for notification: GitHubNotification) -> [AnalysisType] {

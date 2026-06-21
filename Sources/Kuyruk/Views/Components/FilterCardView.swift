@@ -41,10 +41,12 @@ struct FilterCardView: View {
     @ViewBuilder
     private var countView: some View {
         Text("\(self.count)")
-            .font(.title)
+            .font(.title2)
             .fontWeight(.bold)
             .foregroundStyle(.white)
             .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
     }
 
     @ViewBuilder

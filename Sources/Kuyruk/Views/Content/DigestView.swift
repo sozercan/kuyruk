@@ -6,26 +6,16 @@ struct DigestView: View {
     @Environment(NotificationsViewModel.self) private var viewModel
     @Environment(GitHubModelsService.self) private var modelsService
 
-    private let spotlightFilters: [NotificationFilter] = [
-        .inbox,
-        .reviewRequested,
-        .mentioned,
-        .assigned,
-        .participating,
-    ]
-
     var body: some View {
         GeometryReader { geometry in
             let snapshot = DigestSnapshot(
                 viewModel: self.viewModel,
-                spotlightFilters: self.spotlightFilters,
                 analysisRevision: self.viewModel.digestAnalysisRevision)
             let isWideLayout = geometry.size.width >= 920
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     self.heroSection(snapshot: snapshot)
-                    self.spotlightSection(snapshot: snapshot)
                     self.insightSections(snapshot: snapshot, isWideLayout: isWideLayout)
                     self.repositoryActivitySection(snapshot: snapshot)
                 }
@@ -105,28 +95,6 @@ struct DigestView: View {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .stroke(.white.opacity(0.08), lineWidth: 1)
         }
-    }
-
-    private func spotlightSection(snapshot: DigestSnapshot) -> some View {
-        DigestPanel(
-            title: "Spotlight Filters",
-            subtitle: "Jump directly into the busiest smart filters.") {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 140), spacing: 16, alignment: .top)],
-                    spacing: 16) {
-                        ForEach(snapshot.spotlightMetrics) { metric in
-                            Button {
-                                self.viewModel.selectFilter(metric.filter)
-                            } label: {
-                                FilterCardView(
-                                    filter: metric.filter,
-                                    count: metric.count,
-                                    isSelected: self.isSelected(metric.filter))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-            }
     }
 
     @ViewBuilder
@@ -286,11 +254,6 @@ struct DigestView: View {
             """
     }
 
-    private func isSelected(_ filter: NotificationFilter) -> Bool {
-        self.viewModel.appDestination == .notifications &&
-            self.viewModel.selectedFilter == filter
-    }
-
     private func recommendedActionsSubtitle(for snapshot: DigestSnapshot) -> String {
         if self.viewModel.isPreparingDigest {
             let totalPullRequests =
@@ -308,11 +271,11 @@ struct DigestView: View {
         if snapshot.hasExplicitRecommendations {
             return
                 """
-                Threads with explicit next-step guidance rise above summary-only items.
+                Threads that need your action, ranked by priority and freshness.
                 """
         }
 
-        if snapshot.highlightedSummaries.isEmpty {
+        if snapshot.summariesReadyCount == 0 {
             return
                 """
                 Cached recommendations will appear here once summaries include clear action \
@@ -320,7 +283,7 @@ struct DigestView: View {
                 """
         }
 
-        return "No explicit next steps yet, so the strongest cached summaries are standing in."
+        return "You're all caught up — nothing needs your action right now."
     }
 
     private var backgroundView: some View {
@@ -371,31 +334,37 @@ struct DigestSnapshot {
     let summariesReadyCount: Int
     let recommendationsReadyCount: Int
     let repositoryCount: Int
-    let spotlightMetrics: [DigestFilterMetric]
     let recentUnread: [GitHubNotification]
     let recommendedActions: [DigestSummaryItem]
-    let highlightedSummaries: [DigestSummaryItem]
     let repositoryActivity: [DigestRepositoryActivity]
 
     var hasExplicitRecommendations: Bool {
         self.recommendationsReadyCount > 0
     }
 
+    /// Items shown in the Recommended Actions panel — the ranked, actionable set.
+    /// Intentionally has no unfiltered fallback so non-actionable items can never
+    /// re-enter the panel; an empty result renders the panel's empty state.
     var primaryInsights: [DigestSummaryItem] {
-        if self.recommendedActions.isEmpty {
-            return self.highlightedSummaries
-        }
-
-        return self.recommendedActions
+        self.recommendedActions
     }
 
     init(
         viewModel: NotificationsViewModel,
-        spotlightFilters: [NotificationFilter],
-        analysisRevision: Int = 0) {
+        analysisRevision: Int = 0,
+        now: Date = Date()) {
         _ = analysisRevision
         let notifications = viewModel.notifications
         let summaries = notifications.compactMap { notification -> DigestSummaryItem? in
+            // Drop pull requests that are known to be merged/closed so they never
+            // surface as actionable. Fails open: PRs with no/stale cached state pass through.
+            if notification.subject.type == .pullRequest,
+               let prState = viewModel.cachedPullRequestState(for: notification),
+               prState.isValid(for: notification),
+               prState.isResolved {
+                return nil
+            }
+
             guard let cached = viewModel.cachedSummary(for: notification),
                   cached.isValid(for: notification)
             else {
@@ -406,12 +375,20 @@ struct DigestSnapshot {
                 return nil
             }
 
+            let actionRecommendation = Self.normalizedText(cached.actionRecommendation)
+
             return DigestSummaryItem(
                 notification: notification,
                 summaryText: summaryText,
                 priorityScore: Self.normalizedText(cached.priorityScore),
                 priorityExplanation: Self.normalizedText(cached.priorityExplanation),
-                actionRecommendation: Self.normalizedText(cached.actionRecommendation))
+                actionRecommendation: actionRecommendation,
+                isActionable: Self.isActionable(
+                    actionRecommendation: actionRecommendation,
+                    subjectType: notification.subject.type,
+                    reason: notification.reason,
+                    updatedAt: notification.updatedAt,
+                    now: now))
         }
         let rankedSummaries = summaries.sorted(by: Self.areRankedDescending)
 
@@ -421,13 +398,8 @@ struct DigestSnapshot {
         self.unreadCount = viewModel.unreadCount
         self.snoozedCount = viewModel.snoozedCount
         self.summariesReadyCount = summaries.count
-        self.recommendationsReadyCount = summaries.count(where: { $0.hasActionRecommendation })
+        self.recommendationsReadyCount = summaries.count(where: { $0.isActionable })
         self.repositoryCount = max(viewModel.repositories.count, groupedByRepository.count)
-        self.spotlightMetrics = spotlightFilters.map { filter in
-            DigestFilterMetric(
-                filter: filter,
-                count: Self.count(for: filter, in: notifications, viewModel: viewModel))
-        }
         self.recentUnread = Array(
             notifications
                 .filter(\.unread)
@@ -435,10 +407,7 @@ struct DigestSnapshot {
                 .prefix(6))
         self.recommendedActions = Array(
             rankedSummaries
-                .filter(\.hasActionRecommendation)
-                .prefix(6))
-        self.highlightedSummaries = Array(
-            rankedSummaries
+                .filter(\.isActionable)
                 .prefix(6))
         self.repositoryActivity = Array(
             groupedByRepository
@@ -491,8 +460,8 @@ struct DigestSnapshot {
     }
 
     static func areRankedDescending(_ lhs: DigestSummaryItem, _ rhs: DigestSummaryItem) -> Bool {
-        if lhs.hasActionRecommendation != rhs.hasActionRecommendation {
-            return lhs.hasActionRecommendation && !rhs.hasActionRecommendation
+        if lhs.isActionable != rhs.isActionable {
+            return lhs.isActionable && !rhs.isActionable
         }
 
         let leftPriority = Self.priorityRank(lhs.priorityScore)
@@ -509,6 +478,106 @@ struct DigestSnapshot {
         return lhs.notification.id < rhs.notification.id
     }
 
+    // MARK: - Actionability
+
+    /// Items older than this are excluded from Recommended Actions, unless they
+    /// carry a high-signal reason that should never go stale.
+    static let actionableRecencyWindow: TimeInterval = 90 * 24 * 60 * 60
+
+    /// Whether a notification genuinely needs the user's action, combining the AI
+    /// action verdict, the notification's structural kind, and its recency.
+    ///
+    /// Fails open: an item with no negative signal stays actionable so a genuine
+    /// ask is never silently hidden.
+    static func isActionable(
+        actionRecommendation: String?,
+        subjectType: SubjectType,
+        reason: NotificationReason,
+        updatedAt: Date,
+        now: Date) -> Bool {
+        guard hasMeaningfulAction(actionRecommendation) else { return false }
+
+        if isHighSignal(reason) {
+            return true
+        }
+
+        if isLowSignalSubject(type: subjectType, reason: reason) {
+            return false
+        }
+
+        return isRecentEnough(updatedAt: updatedAt, now: now)
+    }
+
+    /// Whether the AI action string expresses a real next step (not FYI / no-op / waiting).
+    static func hasMeaningfulAction(_ actionRecommendation: String?) -> Bool {
+        guard let normalized = normalizedAction(actionRecommendation) else { return false }
+
+        // A clear affirmative ask always wins, even if a negative token co-occurs.
+        let positives = [
+            " needs your ", " need your ", " needs you to ", " requires your ",
+            " your review ", " your response ", " your reply ", " your input ",
+            " your approval ", " your feedback ", " your attention ",
+            " please review", " please respond", " please reply", " please approve",
+            " please merge", " please take a look", " please address",
+        ]
+        if positives.contains(where: { normalized.contains($0) }) {
+            return true
+        }
+
+        // Otherwise an explicit not-actionable signal excludes it.
+        let negatives = [
+            " no action ", " no further action ", " no immediate action ",
+            " action not needed ", " action is not needed ", " needs no action ",
+            " fyi ", " just fyi ", " for your information ", " informational ", " info only ",
+            " nothing to do ", " nothing for you ", " nothing actionable ", " nothing needed ",
+            " waiting on ", " waiting for ", " awaiting ", " pending others ",
+            " safe to ignore ", " you can ignore ", " can be ignored ",
+        ]
+        return !negatives.contains(where: { normalized.contains($0) })
+    }
+
+    /// Canonicalizes a freeform action string for token matching: lowercased, all
+    /// non-alphanumerics (markdown, quotes, punctuation) flattened to spaces, runs
+    /// collapsed, and padded so every probe anchors on word boundaries.
+    static func normalizedAction(_ actionRecommendation: String?) -> String? {
+        guard let raw = normalizedText(actionRecommendation) else { return nil }
+
+        let flattened = raw.lowercased().map { char -> Character in
+            char.isLetter || char.isNumber ? char : " "
+        }
+        let collapsed = String(flattened).split(separator: " ").joined(separator: " ")
+        return collapsed.isEmpty ? nil : " \(collapsed) "
+    }
+
+    /// Reasons that always warrant action regardless of age or subject kind.
+    static func isHighSignal(_ reason: NotificationReason) -> Bool {
+        switch reason {
+        case .reviewRequested, .mention, .teamMention, .assign, .author, .securityAlert:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Structural kinds that are informational by default (releases, CI, watching).
+    static func isLowSignalSubject(type: SubjectType, reason: NotificationReason) -> Bool {
+        if type == .release || type == .checkSuite {
+            return true
+        }
+
+        switch reason {
+        case .subscribed, .ciActivity:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether the notification is recent enough to still count as actionable.
+    static func isRecentEnough(updatedAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(updatedAt) <= actionableRecencyWindow
+    }
+
     /// Orders repositories by unread load, then freshest activity, then name.
     static func repositoryActivityOrder(
         _ lhs: DigestRepositoryActivity,
@@ -522,18 +591,6 @@ struct DigestSnapshot {
         }
 
         return lhs.repository.fullName < rhs.repository.fullName
-    }
-
-    private static func count(
-        for filter: NotificationFilter,
-        in notifications: [GitHubNotification],
-        viewModel: NotificationsViewModel) -> Int {
-        switch filter {
-        case .snoozed:
-            viewModel.snoozedCount
-        default:
-            notifications.count(where: { filter.matches($0) })
-        }
     }
 
     static func priorityRank(_ score: String?) -> Int {
@@ -561,21 +618,15 @@ private struct DigestTrackedPullRequest: Equatable {
     let updatedAt: Date
 }
 
-struct DigestFilterMetric: Identifiable {
-    let filter: NotificationFilter
-    let count: Int
-
-    var id: String {
-        self.filter.id
-    }
-}
-
 struct DigestSummaryItem: Identifiable {
     let notification: GitHubNotification
     let summaryText: String
     let priorityScore: String?
     let priorityExplanation: String?
     let actionRecommendation: String?
+    /// Whether this item genuinely needs the user's action (drives the Recommended
+    /// Actions panel, the ready-count, and ranking). Computed once at snapshot build.
+    let isActionable: Bool
 
     var hasActionRecommendation: Bool {
         self.actionRecommendation != nil

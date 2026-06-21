@@ -564,6 +564,19 @@ final class GitHubClient {
         try await self.request(.user)
     }
 
+    /// Fetches a pull request's resolution state (open / closed / merged / draft).
+    /// - Parameters:
+    ///   - owner: Repository owner login.
+    ///   - repo: Repository name.
+    ///   - number: Pull request number.
+    /// - Returns: The decoded pull request state.
+    func fetchPullRequestState(
+        owner: String,
+        repo: String,
+        number: Int) async throws -> PullRequestStateResponse {
+        try await self.request(.pullRequest(owner: owner, repo: repo, number: number))
+    }
+
     // MARK: - Private Methods
 
     private func request<T: Decodable>(_ endpoint: GitHubEndpoint) async throws -> T {
