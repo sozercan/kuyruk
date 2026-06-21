@@ -11,6 +11,7 @@ struct AISettingsView: View {
         Form {
             self.accountSection
             self.aiSummariesSection
+            self.backendSection
             self.modelPickerSection
             self.usageSection
         }
@@ -85,6 +86,72 @@ struct AISettingsView: View {
         }
     }
 
+    // MARK: - Backend Section
+
+    @ViewBuilder
+    private var backendSection: some View {
+        Section {
+            Picker("Backend", selection: self.backendBinding) {
+                ForEach(AIBackend.allCases) { backend in
+                    Text(backend.displayName).tag(backend)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if self.modelsService.backend == .custom {
+                TextField("Base URL", text: self.customBaseURLBinding, prompt: Text("http://localhost:1337/v1"))
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+
+                SecureField("API Key (optional)", text: self.customAPIKeyBinding)
+                    .textFieldStyle(.roundedBorder)
+
+                Text(
+                    """
+                    Point Kuyruk at any OpenAI-compatible endpoint (e.g. a local vekil proxy). \
+                    Include the path prefix the proxy expects, such as /v1.
+                    """)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Uses the GitHub Models API with your GitHub account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Label("AI Backend", systemImage: "server.rack")
+        }
+    }
+
+    /// Binding for the active backend; refetches models when it changes.
+    private var backendBinding: Binding<AIBackend> {
+        Binding(
+            get: { self.modelsService.backend },
+            set: { newBackend in
+                guard newBackend != self.modelsService.backend else { return }
+                self.modelsService.backend = newBackend
+                Task { await self.modelsService.fetchAvailableModels() }
+            })
+    }
+
+    /// Binding for the custom base URL; refetches models when it changes.
+    private var customBaseURLBinding: Binding<String> {
+        Binding(
+            get: { self.modelsService.customBaseURL },
+            set: { newValue in
+                guard newValue != self.modelsService.customBaseURL else { return }
+                self.modelsService.customBaseURL = newValue
+                Task { await self.modelsService.fetchAvailableModels() }
+            })
+    }
+
+    /// Binding for the custom API key.
+    private var customAPIKeyBinding: Binding<String> {
+        Binding(
+            get: { self.modelsService.customAPIKey ?? "" },
+            set: { self.modelsService.customAPIKey = $0.isEmpty ? nil : $0 })
+    }
+
     // MARK: - Model Picker Section
 
     @ViewBuilder
@@ -122,7 +189,7 @@ struct AISettingsView: View {
                 self.modelPicker
             }
         }
-        .disabled(!self.summariesEnabled || !self.authService.state.isAuthenticated)
+        .disabled(!self.summariesEnabled || !self.modelsService.isReadyToListModels)
     }
 
     @ViewBuilder

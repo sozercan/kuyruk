@@ -26,7 +26,7 @@ enum AnalysisType: String, CaseIterable {
         switch self {
         case .summary,
              .threadSummary:
-            150
+            256
         case .priority:
             100
         case .action:
@@ -88,14 +88,13 @@ final class GitHubModelsService: DigestPreparingModelsService {
         }
     }
 
-    /// Models catalog response (array of models).
-    private struct CatalogResponse: Decodable {
-        let models: [GitHubModel]
+    /// OpenAI-compatible model list response: `{ "data": [ { "id": "..." } ] }`.
+    /// Used by custom backends (e.g. a vekil proxy serving `GET /v1/models`).
+    private struct OpenAIModelList: Decodable {
+        let data: [Entry]
 
-        init(from decoder: Decoder) throws {
-            // The API returns an array directly
-            let container = try decoder.singleValueContainer()
-            self.models = try container.decode([GitHubModel].self)
+        struct Entry: Decodable {
+            let id: String
         }
     }
 
@@ -108,6 +107,28 @@ final class GitHubModelsService: DigestPreparingModelsService {
         static let defaultModelId = "openai/gpt-4o-mini"
         static let maxTokens = 150
         static let selectedModelKey = "ai.selectedModelId"
+        static let backendKey = "ai.backend"
+        static let customBaseUrlKey = "ai.customBaseURL"
+
+        // OpenAI-compatible (custom backend) paths, appended to the user's base URL.
+        static let customChatPath = "/chat/completions"
+        static let customCatalogPath = "/models"
+    }
+
+    /// Resolved endpoint configuration for the active backend.
+    private struct EndpointConfig {
+        let baseURL: String
+        let chatPath: String
+        let catalogPath: String
+        /// Bearer token to attach, or nil to omit the Authorization header.
+        let authToken: String?
+        /// When true, a missing token is a hard error (GitHub Models).
+        let requiresAuth: Bool
+        /// When true, send GitHub REST catalog headers; otherwise plain JSON.
+        let usesGitHubHeaders: Bool
+        /// When true, decode the catalog as a bare `[GitHubModel]` array;
+        /// otherwise decode an OpenAI `{ "data": [{ "id": ... }] }` list.
+        let usesGitHubCatalogShape: Bool
     }
 
     // MARK: - State
@@ -116,6 +137,33 @@ final class GitHubModelsService: DigestPreparingModelsService {
     var selectedModelId: String? {
         didSet {
             UserDefaults.standard.set(self.selectedModelId, forKey: Constants.selectedModelKey)
+        }
+    }
+
+    /// The active AI backend. Persisted via UserDefaults.
+    var backend: AIBackend {
+        didSet {
+            guard self.backend != oldValue else { return }
+            UserDefaults.standard.set(self.backend.rawValue, forKey: Constants.backendKey)
+            self.resetForBackendChange()
+        }
+    }
+
+    /// Base URL for the custom (OpenAI-compatible) backend, including any `/v1`
+    /// suffix the proxy expects. Persisted via UserDefaults.
+    var customBaseURL: String {
+        didSet {
+            guard self.customBaseURL != oldValue else { return }
+            UserDefaults.standard.set(self.customBaseURL, forKey: Constants.customBaseUrlKey)
+            self.resetForBackendChange()
+        }
+    }
+
+    /// API key for the custom backend. Persisted in the Keychain (secret), not UserDefaults.
+    var customAPIKey: String? {
+        didSet {
+            guard self.customAPIKey != oldValue else { return }
+            self.persistCustomAPIKey()
         }
     }
 
@@ -188,6 +236,12 @@ final class GitHubModelsService: DigestPreparingModelsService {
 
         // Load persisted model selection
         self.selectedModelId = UserDefaults.standard.string(forKey: Constants.selectedModelKey)
+
+        // Load persisted backend configuration
+        self.backend = UserDefaults.standard.string(forKey: Constants.backendKey)
+            .flatMap(AIBackend.init(rawValue:)) ?? .githubModels
+        self.customBaseURL = UserDefaults.standard.string(forKey: Constants.customBaseUrlKey) ?? ""
+        self.customAPIKey = try? KeychainManager.shared.getAIProxyKey()
     }
 
     // MARK: - Public Methods
@@ -202,7 +256,8 @@ final class GitHubModelsService: DigestPreparingModelsService {
         defer { self.isLoadingModels = false }
 
         do {
-            let request = try self.buildRequest(path: Constants.catalogPath, method: "GET")
+            let config = try self.currentEndpointConfig()
+            let request = try self.buildRequest(path: config.catalogPath, method: "GET", config: config)
 
             DiagnosticsLogger.info("Fetching models catalog", category: .api)
 
@@ -215,7 +270,7 @@ final class GitHubModelsService: DigestPreparingModelsService {
             self.updateRateLimitInfo(from: httpResponse)
             try Self.handleResponseStatus(httpResponse, rateLimitReset: self.rateLimitReset)
 
-            self.availableModels = try self.decoder.decode([GitHubModel].self, from: data)
+            self.availableModels = try self.decodeModels(from: data, config: config)
 
             DiagnosticsLogger.info("Fetched \(self.availableModels.count) models", category: .api)
 
@@ -363,9 +418,24 @@ final class GitHubModelsService: DigestPreparingModelsService {
         }
     }
 
-    /// Whether summaries can be generated (model selected and authenticated).
+    /// Whether summaries can be generated (model selected and backend ready).
     var canGenerateSummaries: Bool {
-        self.selectedModelId != nil && self.authService.state.isAuthenticated
+        self.selectedModelId != nil && self.isBackendReady
+    }
+
+    /// Whether the active backend is configured enough to list models.
+    var isReadyToListModels: Bool {
+        self.isBackendReady
+    }
+
+    /// Whether the active backend has the credentials/endpoint it needs.
+    private var isBackendReady: Bool {
+        switch self.backend {
+        case .githubModels:
+            self.authService.state.isAuthenticated
+        case .custom:
+            !self.normalizedCustomBaseURL.isEmpty
+        }
     }
 
     /// Whether the API is currently rate limited.
@@ -403,7 +473,8 @@ final class GitHubModelsService: DigestPreparingModelsService {
             ],
             maxTokens: type.maxTokens)
 
-        var request = try self.buildRequest(path: Constants.inferencePath, method: "POST")
+        let config = try self.currentEndpointConfig()
+        var request = try self.buildRequest(path: config.chatPath, method: "POST", config: config)
         request.httpBody = try self.encoder.encode(chatRequest)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -507,14 +578,16 @@ final class GitHubModelsService: DigestPreparingModelsService {
         switch type {
         case .summary:
             return """
-            Summarize this GitHub notification in 2-3 sentences:
+            Summarize this GitHub notification in 2-3 complete sentences. \
+            Keep it under 60 words and finish your final sentence. Use plain text, no markdown.
             \(notificationInfo)
             """
 
         case .threadSummary:
             return """
             Summarize the discussion thread on this GitHub notification. \
-            What's the current status? Keep it to 2-3 sentences.
+            What's the current status? Use 2-3 complete sentences, under 60 words, \
+            and finish your final sentence. Use plain text, no markdown.
             \(notificationInfo)
             """
 
@@ -545,31 +618,110 @@ final class GitHubModelsService: DigestPreparingModelsService {
 
     /// Builds an authenticated request for the Models API.
     ///
-    /// The catalog endpoint uses GitHub REST API headers, while the inference
-    /// endpoint uses standard JSON headers.
-    private func buildRequest(path: String, method: String) throws -> URLRequest {
-        guard let token = self.authService.state.accessToken else {
+    /// Builds a request for the given path using the resolved endpoint config.
+    ///
+    /// The GitHub Models catalog endpoint uses GitHub REST API headers, while the
+    /// inference endpoint (and all custom OpenAI-compatible endpoints) use standard
+    /// JSON headers.
+    private func buildRequest(path: String, method: String, config: EndpointConfig) throws -> URLRequest {
+        if config.requiresAuth, config.authToken == nil {
             throw GitHubError.unauthorized
         }
 
-        guard let url = URL(string: Constants.modelsBaseUrl + path) else {
+        guard let url = URL(string: config.baseURL + path) else {
             throw GitHubError.invalidResponse
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        if path == Constants.inferencePath {
-            // Inference endpoint uses standard JSON headers
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-        } else {
-            // Catalog and other endpoints use GitHub REST API headers
+        if let token = config.authToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        if config.usesGitHubHeaders, path == config.catalogPath {
+            // GitHub Models catalog uses GitHub REST API headers.
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        } else {
+            // Inference and all custom endpoints use standard JSON headers.
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
         }
 
         return request
+    }
+
+    /// Resolves the endpoint configuration for the active backend.
+    private func currentEndpointConfig() throws -> EndpointConfig {
+        switch self.backend {
+        case .githubModels:
+            EndpointConfig(
+                baseURL: Constants.modelsBaseUrl,
+                chatPath: Constants.inferencePath,
+                catalogPath: Constants.catalogPath,
+                authToken: self.authService.state.accessToken,
+                requiresAuth: true,
+                usesGitHubHeaders: true,
+                usesGitHubCatalogShape: true)
+        case .custom:
+            EndpointConfig(
+                baseURL: self.normalizedCustomBaseURL,
+                chatPath: Constants.customChatPath,
+                catalogPath: Constants.customCatalogPath,
+                authToken: self.customAPIKey,
+                requiresAuth: false,
+                usesGitHubHeaders: false,
+                usesGitHubCatalogShape: false)
+        }
+    }
+
+    /// Decodes the catalog response according to the backend's shape.
+    private func decodeModels(from data: Data, config: EndpointConfig) throws -> [GitHubModel] {
+        if config.usesGitHubCatalogShape {
+            return try self.decoder.decode([GitHubModel].self, from: data)
+        }
+
+        // OpenAI-compatible list: { "data": [ { "id": "..." }, ... ] }
+        let list = try self.decoder.decode(OpenAIModelList.self, from: data)
+        return list.data.map { entry in
+            GitHubModel(
+                id: entry.id,
+                name: entry.id,
+                publisher: "",
+                summary: nil,
+                rateLimitTier: nil)
+        }
+    }
+
+    /// The custom base URL with surrounding whitespace and any trailing slash removed.
+    private var normalizedCustomBaseURL: String {
+        var trimmed = self.customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") {
+            trimmed.removeLast()
+        }
+        return trimmed
+    }
+
+    /// Clears the selected model when the backend or its endpoint changes, so the
+    /// next catalog fetch re-defaults instead of leaking a stale model id across
+    /// backends (e.g. a GitHub-namespaced `openai/gpt-4o-mini` into a custom proxy).
+    private func resetForBackendChange() {
+        self.selectedModelId = nil
+        self.availableModels = []
+        self.modelsError = nil
+    }
+
+    /// Writes the custom API key through to the Keychain.
+    private func persistCustomAPIKey() {
+        do {
+            if let key = self.customAPIKey, !key.isEmpty {
+                try KeychainManager.shared.saveAIProxyKey(key)
+            } else {
+                try KeychainManager.shared.deleteAIProxyKey()
+            }
+        } catch {
+            DiagnosticsLogger.error(error, context: "persistCustomAPIKey", category: .api)
+        }
     }
 
     /// Handles HTTP response status codes.

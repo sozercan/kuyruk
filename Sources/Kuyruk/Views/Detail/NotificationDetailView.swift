@@ -412,11 +412,19 @@ struct NotificationDetailView: View {
         case .priority:
             self.priorityBadgeView(value: value)
         default:
-            Text(value)
+            Text(Self.formattedAnalysisText(value))
                 .font(.body)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Renders inline markdown (e.g. `**bold**`) in generated text, preserving
+    /// whitespace, and falls back to the raw string if parsing fails.
+    private static func formattedAnalysisText(_ value: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: value, options: options)) ?? AttributedString(value)
     }
 
     private func priorityBadgeView(value: String) -> some View {

@@ -10,6 +10,7 @@ final class KeychainManager {
     private let serviceName = "com.kuyruk.github-oauth"
     private let accessTokenKey = "github_access_token"
     private let refreshTokenKey = "github_refresh_token"
+    private let aiProxyApiKey = "ai_proxy_api_key"
 
     private init() {}
 
@@ -45,6 +46,23 @@ final class KeychainManager {
     /// Deletes the refresh token from the Keychain.
     func deleteRefreshToken() throws {
         try self.delete(forKey: self.refreshTokenKey)
+    }
+
+    // MARK: - AI Proxy API Key
+
+    /// Saves the custom AI proxy API key to the Keychain.
+    func saveAIProxyKey(_ key: String) throws {
+        try self.save(key, forKey: self.aiProxyApiKey)
+    }
+
+    /// Retrieves the custom AI proxy API key from the Keychain.
+    func getAIProxyKey() throws -> String? {
+        try self.retrieve(forKey: self.aiProxyApiKey)
+    }
+
+    /// Deletes the custom AI proxy API key from the Keychain.
+    func deleteAIProxyKey() throws {
+        try self.delete(forKey: self.aiProxyApiKey)
     }
 
     // MARK: - Clear All

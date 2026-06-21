@@ -102,6 +102,12 @@ enum GitHubModelsTestFixtures {
     {"choices":[{"message":{"content":"This is a test summary."}}]}
     """
 
+    /// OpenAI-compatible `/v1/models` list response (custom backend shape).
+    static let mockOpenAIModelsJSON = """
+    {"object":"list","data":[{"id":"gpt-4o-mini","object":"model"},\
+    {"id":"claude-sonnet-4","object":"model"}]}
+    """
+
     static let mockModelMissingOptionals = """
     [{"id":"test/model","name":"Test Model","publisher":"Test Publisher"}]
     """
@@ -477,6 +483,162 @@ struct GitHubModelsServiceAPITests {
 
         // Initially not rate limited
         #expect(service.isRateLimited == false)
+    }
+
+    // MARK: - Custom Backend Tests
+
+    @Test("Custom backend targets the configured base URL and OpenAI chat path")
+    func customBackendChatRequestURL() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
+        MockURLProtocol.setMockResponse(statusCode: 200)
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        // Trailing slash should be trimmed before appending the path.
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1/"
+        service.selectedModelId = "gpt-4o-mini"
+
+        _ = try await service.generateAnalysis(
+            for: GitHubModelsTestFixtures.makeNotification(),
+            type: .summary)
+
+        let lastURL = try #require(MockURLProtocol.lastRequest?.url?.absoluteString)
+        #expect(lastURL == "http://localhost:1337/v1/chat/completions")
+    }
+
+    @Test("Custom backend sends API key as bearer when set")
+    func customBackendSendsBearer() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
+        MockURLProtocol.setMockResponse(statusCode: 200)
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1"
+        service.customAPIKey = "secret-key"
+        service.selectedModelId = "gpt-4o-mini"
+
+        _ = try await service.generateAnalysis(
+            for: GitHubModelsTestFixtures.makeNotification(),
+            type: .summary)
+
+        let auth = MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Authorization")
+        #expect(auth == "Bearer secret-key")
+
+        service.customAPIKey = nil
+    }
+
+    @Test("Custom backend omits authorization header when no API key")
+    func customBackendOmitsBearerWithoutKey() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
+        MockURLProtocol.setMockResponse(statusCode: 200)
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1"
+        service.customAPIKey = nil
+        service.selectedModelId = "gpt-4o-mini"
+
+        _ = try await service.generateAnalysis(
+            for: GitHubModelsTestFixtures.makeNotification(),
+            type: .summary)
+
+        let auth = MockURLProtocol.lastRequest?.value(forHTTPHeaderField: "Authorization")
+        #expect(auth == nil)
+    }
+
+    @Test("Custom backend decodes OpenAI model list")
+    func customBackendDecodesModelList() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.mockData = GitHubModelsTestFixtures.mockOpenAIModelsJSON.data(using: .utf8)
+        MockURLProtocol.setMockResponse(statusCode: 200)
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1"
+
+        await service.fetchAvailableModels()
+
+        #expect(service.availableModels.map(\.id) == ["gpt-4o-mini", "claude-sonnet-4"])
+        // Synthesized models have no publisher, so displayName is the bare id.
+        #expect(service.availableModels.first?.displayName == "gpt-4o-mini")
+        // Catalog request used the OpenAI /models path on the custom base URL.
+        let url = try #require(MockURLProtocol.lastRequest?.url?.absoluteString)
+        #expect(url == "http://localhost:1337/v1/models")
+    }
+
+    @Test("Custom backend is ready to generate without GitHub auth")
+    func customBackendReadyWithoutAuth() async throws {
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: nil)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+
+        // No endpoint yet → not ready.
+        service.customBaseURL = ""
+        #expect(service.isReadyToListModels == false)
+        #expect(service.canGenerateSummaries == false)
+
+        // Endpoint + model → ready, despite being unauthenticated with GitHub.
+        service.customBaseURL = "http://localhost:1337/v1"
+        service.selectedModelId = "gpt-4o-mini"
+        #expect(service.isReadyToListModels == true)
+        #expect(service.canGenerateSummaries == true)
+    }
+
+    @Test("Switching backend resets the selected model")
+    func switchingBackendResetsSelection() async throws {
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: nil)
+        defer { Self.resetBackend(service) }
+
+        service.selectedModelId = "openai/gpt-4o-mini"
+        service.backend = .custom
+
+        #expect(service.selectedModelId == nil)
+        #expect(service.availableModels.isEmpty)
+    }
+
+    /// Restores backend-related persisted state mutated by a custom-backend test so
+    /// it does not leak across the serialized suite or into the real Keychain.
+    private static func resetBackend(_ service: GitHubModelsService) {
+        service.customAPIKey = nil
+        service.customBaseURL = ""
+        service.backend = .githubModels
+        service.selectedModelId = nil
     }
 }
 

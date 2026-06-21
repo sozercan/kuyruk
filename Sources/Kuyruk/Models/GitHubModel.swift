@@ -21,8 +21,11 @@ struct GitHubModel: Codable, Identifiable, Hashable, Sendable {
 
 extension GitHubModel {
     /// Human-readable display name combining publisher and model name.
+    ///
+    /// Custom (OpenAI-compatible) backends have no publisher, so the bare model
+    /// id/name is shown instead of a `publisher/name` pair.
     var displayName: String {
-        "\(self.publisher)/\(self.name)"
+        self.publisher.isEmpty ? self.name : "\(self.publisher)/\(self.name)"
     }
 
     /// Whether this is a low-tier model (suitable for frequent summaries).

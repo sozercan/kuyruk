@@ -148,6 +148,11 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     </array>
     <key>NSUserNotificationAlertStyle</key>
     <string>alert</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>LSUIElement</key>
     <false/>
     <key>KuyrukBuildTimestamp</key>
