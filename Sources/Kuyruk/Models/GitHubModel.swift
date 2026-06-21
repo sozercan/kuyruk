@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a model from the GitHub Models catalog.
-struct GitHubModel: Codable, Identifiable, Hashable, Sendable {
+struct GitHubModel: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let publisher: String

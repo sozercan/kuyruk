@@ -5,12 +5,14 @@ import SwiftUI
 struct DigestView: View {
     @Environment(NotificationsViewModel.self) private var viewModel
     @Environment(GitHubModelsService.self) private var modelsService
+    @AppStorage("aiSummariesEnabled") private var aiSummariesEnabled: Bool = true
 
     var body: some View {
         GeometryReader { geometry in
             let snapshot = DigestSnapshot(
                 viewModel: self.viewModel,
-                analysisRevision: self.viewModel.digestAnalysisRevision)
+                analysisRevision: self.viewModel.digestAnalysisRevision,
+                allowsCachedAIContent: self.aiSummariesEnabled)
             let isWideLayout = geometry.size.width >= 920
 
             ScrollView {
@@ -26,7 +28,9 @@ struct DigestView: View {
         }
         .navigationTitle(AppDestination.digest.displayName)
         .task(id: self.digestPreparationTrigger) {
-            await self.viewModel.prepareDigest(using: self.modelsService)
+            await self.viewModel.prepareDigest(
+                using: self.modelsService,
+                allowsAnalysisGeneration: self.aiSummariesEnabled)
         }
     }
 
@@ -319,6 +323,7 @@ struct DigestView: View {
             .sorted { $0.id < $1.id }
 
         return DigestPreparationTrigger(
+            aiSummariesEnabled: self.aiSummariesEnabled,
             canGenerateSummaries: self.modelsService.canGenerateSummaries,
             selectedModelId: self.modelsService.selectedModelId,
             pullRequests: pullRequests)
@@ -352,10 +357,11 @@ struct DigestSnapshot {
     init(
         viewModel: NotificationsViewModel,
         analysisRevision: Int = 0,
+        allowsCachedAIContent: Bool = true,
         now: Date = Date()) {
         _ = analysisRevision
         let notifications = viewModel.notifications
-        let summaries = notifications.compactMap { notification -> DigestSummaryItem? in
+        let summaries = allowsCachedAIContent ? notifications.compactMap { notification -> DigestSummaryItem? in
             // Drop pull requests that are known to be merged/closed so they never
             // surface as actionable. Fails open: PRs with no/stale cached state pass through.
             if notification.subject.type == .pullRequest,
@@ -389,7 +395,7 @@ struct DigestSnapshot {
                     reason: notification.reason,
                     updatedAt: notification.updatedAt,
                     now: now))
-        }
+        } : []
         let rankedSummaries = summaries.sorted(by: Self.areRankedDescending)
 
         let summaryIds = Set(summaries.map(\.id))
@@ -495,17 +501,17 @@ struct DigestSnapshot {
         reason: NotificationReason,
         updatedAt: Date,
         now: Date) -> Bool {
-        guard hasMeaningfulAction(actionRecommendation) else { return false }
+        guard self.hasMeaningfulAction(actionRecommendation) else { return false }
 
-        if isHighSignal(reason) {
+        if self.isHighSignal(reason) {
             return true
         }
 
-        if isLowSignalSubject(type: subjectType, reason: reason) {
+        if self.isLowSignalSubject(type: subjectType, reason: reason) {
             return false
         }
 
-        return isRecentEnough(updatedAt: updatedAt, now: now)
+        return self.isRecentEnough(updatedAt: updatedAt, now: now)
     }
 
     /// Whether the AI action string expresses a real next step (not FYI / no-op / waiting).
@@ -552,7 +558,12 @@ struct DigestSnapshot {
     /// Reasons that always warrant action regardless of age or subject kind.
     static func isHighSignal(_ reason: NotificationReason) -> Bool {
         switch reason {
-        case .reviewRequested, .mention, .teamMention, .assign, .author, .securityAlert:
+        case .reviewRequested,
+             .mention,
+             .teamMention,
+             .assign,
+             .author,
+             .securityAlert:
             true
         default:
             false
@@ -566,7 +577,8 @@ struct DigestSnapshot {
         }
 
         switch reason {
-        case .subscribed, .ciActivity:
+        case .subscribed,
+             .ciActivity:
             return true
         default:
             return false
@@ -575,7 +587,7 @@ struct DigestSnapshot {
 
     /// Whether the notification is recent enough to still count as actionable.
     static func isRecentEnough(updatedAt: Date, now: Date) -> Bool {
-        now.timeIntervalSince(updatedAt) <= actionableRecencyWindow
+        now.timeIntervalSince(updatedAt) <= self.actionableRecencyWindow
     }
 
     /// Orders repositories by unread load, then freshest activity, then name.
@@ -608,6 +620,7 @@ struct DigestSnapshot {
 }
 
 private struct DigestPreparationTrigger: Equatable {
+    let aiSummariesEnabled: Bool
     let canGenerateSummaries: Bool
     let selectedModelId: String?
     let pullRequests: [DigestTrackedPullRequest]

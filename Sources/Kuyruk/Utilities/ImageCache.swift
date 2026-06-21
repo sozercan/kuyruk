@@ -4,6 +4,7 @@ import Foundation
 /// Thread-safe image cache with in-memory and optional disk persistence.
 /// Used for caching avatar images to eliminate re-downloads.
 actor ImageCache {
+
     // MARK: - Singleton
 
     static let shared = ImageCache()

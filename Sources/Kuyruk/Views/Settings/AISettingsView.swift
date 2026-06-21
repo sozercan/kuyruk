@@ -6,6 +6,7 @@ struct AISettingsView: View {
     @Environment(AuthService.self) private var authService
 
     @AppStorage("aiSummariesEnabled") private var summariesEnabled: Bool = true
+    @State private var customModelFetchTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -24,7 +25,6 @@ struct AISettingsView: View {
 
     // MARK: - Account Section
 
-    @ViewBuilder
     private var accountSection: some View {
         Section("GitHub Account") {
             if self.authService.state.isAuthenticated {
@@ -71,7 +71,6 @@ struct AISettingsView: View {
 
     // MARK: - AI Summaries Section
 
-    @ViewBuilder
     private var aiSummariesSection: some View {
         Section {
             Toggle("Enable TL;DR Summaries", isOn: self.$summariesEnabled)
@@ -88,7 +87,6 @@ struct AISettingsView: View {
 
     // MARK: - Backend Section
 
-    @ViewBuilder
     private var backendSection: some View {
         Section {
             Picker("Backend", selection: self.backendBinding) {
@@ -134,15 +132,30 @@ struct AISettingsView: View {
             })
     }
 
-    /// Binding for the custom base URL; refetches models when it changes.
+    /// Binding for the custom base URL; debounces model refetches while the user types.
     private var customBaseURLBinding: Binding<String> {
         Binding(
             get: { self.modelsService.customBaseURL },
             set: { newValue in
                 guard newValue != self.modelsService.customBaseURL else { return }
                 self.modelsService.customBaseURL = newValue
-                Task { await self.modelsService.fetchAvailableModels() }
+                self.scheduleCustomModelFetch()
             })
+    }
+
+    /// Schedules a latest-value catalog fetch after URL editing settles.
+    private func scheduleCustomModelFetch() {
+        self.customModelFetchTask?.cancel()
+        self.customModelFetchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await self.modelsService.fetchAvailableModels()
+        }
     }
 
     /// Binding for the custom API key.
@@ -154,7 +167,6 @@ struct AISettingsView: View {
 
     // MARK: - Model Picker Section
 
-    @ViewBuilder
     private var modelPickerSection: some View {
         Section("Model") {
             if self.modelsService.isLoadingModels {
@@ -233,7 +245,6 @@ struct AISettingsView: View {
 
     // MARK: - Usage Section
 
-    @ViewBuilder
     private var usageSection: some View {
         Section("Usage") {
             if let remaining = modelsService.rateLimitRemaining {

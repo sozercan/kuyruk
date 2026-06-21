@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents the authenticated GitHub user.
-struct GitHubUser: Codable, Sendable, Identifiable {
+struct GitHubUser: Codable, Identifiable {
     let id: Int
     let login: String
     let nodeId: String

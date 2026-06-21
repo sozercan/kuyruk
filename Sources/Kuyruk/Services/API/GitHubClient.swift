@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur when interacting with the GitHub API.
-enum GitHubError: Error, LocalizedError, Sendable {
+enum GitHubError: Error, LocalizedError {
     case unauthorized
     case authenticationFailed(String)
     case invalidResponse
@@ -103,10 +103,35 @@ enum GitHubEndpoint {
     }
 }
 
+/// Minimal interface used by the notifications UI to fetch and mutate GitHub state.
+@MainActor
+protocol GitHubClienting: AnyObject {
+    var isCacheValid: Bool { get }
+    var hasConditionalHeaders: Bool { get }
+
+    func fetchAllNotificationsProgressive(
+        all: Bool,
+        participating: Bool,
+        onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification]?
+
+    func fetchAllNotificationsForced(
+        all: Bool,
+        participating: Bool) async throws -> [GitHubNotification]
+
+    func updateCachedNotification(_ notification: GitHubNotification)
+    func markAsRead(threadId: String) async throws
+
+    func fetchPullRequestState(
+        owner: String,
+        repo: String,
+        number: Int) async throws -> PullRequestStateResponse
+}
+
 /// GitHub API client for making authenticated requests.
 @MainActor
 @Observable
 final class GitHubClient {
+
     // MARK: - Properties
 
     private let baseUrl = "https://api.github.com"
@@ -666,3 +691,5 @@ final class GitHubClient {
         }
     }
 }
+
+extension GitHubClient: GitHubClienting {}

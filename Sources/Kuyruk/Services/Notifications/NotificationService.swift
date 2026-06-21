@@ -5,6 +5,7 @@ import UserNotifications
 @MainActor
 @Observable
 final class NotificationService {
+
     // MARK: - Properties
 
     private(set) var isAuthorized: Bool = false

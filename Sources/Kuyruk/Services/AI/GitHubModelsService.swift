@@ -55,6 +55,7 @@ protocol DigestPreparingModelsService: AnyObject {
 @MainActor
 @Observable
 final class GitHubModelsService: DigestPreparingModelsService {
+
     // MARK: - Types
 
     /// Chat completion request body.
@@ -116,7 +117,7 @@ final class GitHubModelsService: DigestPreparingModelsService {
     }
 
     /// Resolved endpoint configuration for the active backend.
-    private struct EndpointConfig {
+    private struct EndpointConfig: Equatable {
         let baseURL: String
         let chatPath: String
         let catalogPath: String
@@ -173,6 +174,9 @@ final class GitHubModelsService: DigestPreparingModelsService {
 
     /// Whether models are currently being fetched.
     private(set) var isLoadingModels: Bool = false
+
+    /// Whether another catalog load was requested while one was already active.
+    private var needsModelCatalogRefetch = false
 
     /// Error message from the last models fetch attempt.
     private(set) var modelsError: String?
@@ -249,13 +253,28 @@ final class GitHubModelsService: DigestPreparingModelsService {
 
     /// Fetches available models from the GitHub Models catalog.
     func fetchAvailableModels() async {
-        guard !self.isLoadingModels else { return }
+        guard !self.isLoadingModels else {
+            self.needsModelCatalogRefetch = true
+            return
+        }
 
         self.isLoadingModels = true
-        self.modelsError = nil
 
-        defer { self.isLoadingModels = false }
+        defer {
+            self.isLoadingModels = false
+            self.needsModelCatalogRefetch = false
+        }
 
+        repeat {
+            self.needsModelCatalogRefetch = false
+            self.modelsError = nil
+
+            await self.fetchAvailableModelsOnce()
+        } while self.needsModelCatalogRefetch
+    }
+
+    /// Performs one catalog load using the current endpoint configuration.
+    private func fetchAvailableModelsOnce() async {
         do {
             let config = try self.currentEndpointConfig()
             let request = try self.buildRequest(path: config.catalogPath, method: "GET", config: config)
@@ -271,19 +290,17 @@ final class GitHubModelsService: DigestPreparingModelsService {
             self.updateRateLimitInfo(from: httpResponse)
             try Self.handleResponseStatus(httpResponse, rateLimitReset: self.rateLimitReset)
 
+            guard (try? self.currentEndpointConfig()) == config else {
+                self.needsModelCatalogRefetch = true
+                DiagnosticsLogger.debug("Discarded stale models catalog response", category: .api)
+                return
+            }
+
             self.availableModels = try self.decodeModels(from: data, config: config)
 
             DiagnosticsLogger.info("Fetched \(self.availableModels.count) models", category: .api)
 
-            // Set default model if none selected
-            if self.selectedModelId == nil, !self.availableModels.isEmpty {
-                // Prefer the default model if available
-                if self.availableModels.contains(where: { $0.id == Constants.defaultModelId }) {
-                    self.selectedModelId = Constants.defaultModelId
-                } else {
-                    self.selectedModelId = self.availableModels.first?.id
-                }
-            }
+            self.selectAvailableModelIfNeeded()
         } catch {
             DiagnosticsLogger.error(error, context: "fetchAvailableModels", category: .api)
             self.modelsError = error.localizedDescription
@@ -701,6 +718,25 @@ final class GitHubModelsService: DigestPreparingModelsService {
             trimmed.removeLast()
         }
         return trimmed
+    }
+
+    /// Keeps the selected model aligned with the most recently loaded catalog.
+    private func selectAvailableModelIfNeeded() {
+        guard !self.availableModels.isEmpty else {
+            self.selectedModelId = nil
+            return
+        }
+
+        if let selectedModelId = self.selectedModelId,
+           self.availableModels.contains(where: { $0.id == selectedModelId }) {
+            return
+        }
+
+        if self.availableModels.contains(where: { $0.id == Constants.defaultModelId }) {
+            self.selectedModelId = Constants.defaultModelId
+        } else {
+            self.selectedModelId = self.availableModels.first?.id
+        }
     }
 
     /// Clears the selected model when the backend or its endpoint changes, so the

@@ -1,7 +1,7 @@
 import Foundation
 
 /// The resolution state of a pull request.
-enum PullRequestStatus: String, Codable, Sendable {
+enum PullRequestStatus: String, Codable {
     case open
     case closed
     case merged
@@ -19,7 +19,7 @@ enum PullRequestStatus: String, Codable, Sendable {
 }
 
 /// Minimal decode of `GET /repos/{owner}/{repo}/pulls/{number}` for resolution state.
-struct PullRequestStateResponse: Decodable, Sendable {
+struct PullRequestStateResponse: Decodable {
     let state: String
     let merged: Bool?
     let draft: Bool?

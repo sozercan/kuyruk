@@ -1,18 +1,18 @@
 import Foundation
 
-/// API Explorer - CLI tool for exploring GitHub API endpoints
-/// Usage: swift run api-explorer <command> [options]
-///
-/// Commands:
-///   auth                   - Check authentication status
-///   notifications          - List notifications
-///   notification <id>      - Get notification details
-///   user                   - Get current user info
-///   models                 - List available GitHub Models
-///   models-chat <prompt>   - Test chat completion with GitHub Models
-///
-/// Options:
-///   -v, --verbose          - Show verbose output
+// API Explorer - CLI tool for exploring GitHub API endpoints
+// Usage: swift run api-explorer <command> [options]
+//
+// Commands:
+//   auth                   - Check authentication status
+//   notifications          - List notifications
+//   notification <id>      - Get notification details
+//   user                   - Get current user info
+//   models                 - List available GitHub Models
+//   models-chat <prompt>   - Test chat completion with GitHub Models
+//
+// Options:
+//   -v, --verbose          - Show verbose output
 
 @main
 struct APIExplorer {

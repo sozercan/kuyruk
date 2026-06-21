@@ -292,6 +292,182 @@ struct NotificationsViewModelMergeTests {
     }
 }
 
+// MARK: - Notifications ViewModel Digest Tests
+
+@Suite(.serialized)
+@MainActor
+struct NotificationsViewModelDigestTests {
+    @Test
+    func `Prepare digest refreshes pull request state even when analyses are cached`() async throws {
+        let notification = KuyrukTests.makeNotification(
+            id: "pr-cached",
+            reason: .reviewRequested,
+            type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        try dataStore.updateAnalysis(
+            for: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            type: .priority,
+            value: "High",
+            priorityExplanation: "Needs review before release.",
+            model: "test-model")
+        try dataStore.updateAnalysis(
+            for: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            type: .action,
+            value: "Review this pull request.",
+            model: "test-model")
+
+        let gitHubClient = MockDigestGitHubClient(notifications: [notification])
+        gitHubClient.pullRequestResponse = PullRequestStateResponse(
+            state: "closed",
+            merged: true,
+            draft: false)
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+        await viewModel.forceRefresh()
+
+        #expect(DigestSnapshot(viewModel: viewModel).recommendedActions.count == 1)
+
+        let modelsService = MockDigestModelsService()
+        await viewModel.prepareDigest(using: modelsService)
+
+        #expect(gitHubClient.pullRequestFetches == [PullRequestFetch(owner: "owner", repo: "test-repo", number: 1)])
+        #expect(modelsService.generatedTypes.isEmpty)
+        #expect(try dataStore.fetchPullRequestState(for: notification.id)?.status == .merged)
+        #expect(DigestSnapshot(viewModel: viewModel).recommendedActions.isEmpty)
+    }
+
+    @Test
+    func `Digest snapshot hides cached AI recommendations when AI content is disabled`() async throws {
+        let notification = KuyrukTests.makeNotification(
+            id: "pr-cached-hidden",
+            reason: .reviewRequested,
+            type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        try dataStore.updateAnalysis(
+            for: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            type: .priority,
+            value: "High",
+            priorityExplanation: "Needs review before release.",
+            model: "test-model")
+        try dataStore.updateAnalysis(
+            for: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            type: .action,
+            value: "Review this pull request.",
+            model: "test-model")
+
+        let gitHubClient = MockDigestGitHubClient(notifications: [notification])
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+        await viewModel.forceRefresh()
+
+        #expect(DigestSnapshot(viewModel: viewModel).recommendationsReadyCount == 1)
+        let disabledSnapshot = DigestSnapshot(
+            viewModel: viewModel,
+            allowsCachedAIContent: false)
+        #expect(disabledSnapshot.summariesReadyCount == 0)
+        #expect(disabledSnapshot.recommendationsReadyCount == 0)
+        #expect(disabledSnapshot.recommendedActions.isEmpty)
+    }
+
+    @Test
+    func `Prepare digest with AI disabled refreshes pull request state without generating analyses`() async throws {
+        let notification = KuyrukTests.makeNotification(
+            id: "pr-ai-disabled",
+            reason: .reviewRequested,
+            type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        let gitHubClient = MockDigestGitHubClient(notifications: [notification])
+        gitHubClient.pullRequestResponse = PullRequestStateResponse(
+            state: "closed",
+            merged: true,
+            draft: false)
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+        await viewModel.forceRefresh()
+
+        let modelsService = MockDigestModelsService()
+        await viewModel.prepareDigest(
+            using: modelsService,
+            allowsAnalysisGeneration: false)
+
+        #expect(gitHubClient.pullRequestFetches == [PullRequestFetch(owner: "owner", repo: "test-repo", number: 1)])
+        #expect(modelsService.generatedTypes.isEmpty)
+        #expect(viewModel.digestPendingPRAnalysisCount == 0)
+        #expect(try dataStore.fetchPullRequestState(for: notification.id)?.status == .merged)
+    }
+
+    private func makeViewModel(
+        gitHubClient: MockDigestGitHubClient,
+        dataStore: DataStore) -> NotificationsViewModel {
+        let authService = AuthService()
+        let realGitHubClient = GitHubClient(authService: authService, enablePinning: false)
+        let syncService = SyncService(gitHubClient: realGitHubClient, dataStore: dataStore)
+
+        return NotificationsViewModel(
+            gitHubClient: gitHubClient,
+            dataStore: dataStore,
+            syncService: syncService)
+    }
+}
+
+private struct PullRequestFetch: Equatable {
+    let owner: String
+    let repo: String
+    let number: Int
+}
+
+@MainActor
+private final class MockDigestGitHubClient: GitHubClienting {
+    var isCacheValid = false
+    var hasConditionalHeaders = false
+    var notifications: [GitHubNotification]
+    var pullRequestResponse = PullRequestStateResponse(state: "open", merged: false, draft: false)
+    private(set) var pullRequestFetches: [PullRequestFetch] = []
+
+    init(notifications: [GitHubNotification]) {
+        self.notifications = notifications
+    }
+
+    func fetchAllNotificationsProgressive(
+        all: Bool,
+        participating: Bool,
+        onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification]? {
+        onBatchReceived(self.notifications)
+        return self.notifications
+    }
+
+    func fetchAllNotificationsForced(
+        all: Bool,
+        participating: Bool) async throws -> [GitHubNotification] {
+        self.notifications
+    }
+
+    func updateCachedNotification(_ notification: GitHubNotification) {}
+
+    func markAsRead(threadId: String) async throws {}
+
+    func fetchPullRequestState(
+        owner: String,
+        repo: String,
+        number: Int) async throws -> PullRequestStateResponse {
+        self.pullRequestFetches.append(PullRequestFetch(owner: owner, repo: repo, number: number))
+        return self.pullRequestResponse
+    }
+}
+
+@MainActor
+private final class MockDigestModelsService: DigestPreparingModelsService {
+    var canGenerateSummaries = true
+    var selectedModelId: String? = "test-model"
+    private(set) var generatedTypes: [AnalysisType] = []
+
+    func generateAnalysis(for notification: GitHubNotification, type: AnalysisType) async throws -> String {
+        self.generatedTypes.append(type)
+        return "Generated \(type.rawValue)"
+    }
+}
+
 // MARK: - Digest Snapshot Ranking Tests
 
 @MainActor

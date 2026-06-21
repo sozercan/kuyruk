@@ -5,6 +5,7 @@ import SwiftData
 @MainActor
 @Observable
 final class DataStore {
+
     // MARK: - Properties
 
     private let modelContainer: ModelContainer

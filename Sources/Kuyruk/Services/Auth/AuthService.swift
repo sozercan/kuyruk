@@ -38,7 +38,7 @@ enum OAuthConfig {
 // MARK: - Device Flow State
 
 /// State for the device flow authentication
-struct DeviceFlowState: Equatable, Sendable {
+struct DeviceFlowState: Equatable {
     let userCode: String
     let verificationUri: String
     let expiresIn: Int
@@ -48,7 +48,7 @@ struct DeviceFlowState: Equatable, Sendable {
 // MARK: - Auth State
 
 /// Authentication state machine
-enum AuthState: Equatable, Sendable {
+enum AuthState: Equatable {
     case unknown
     case unauthenticated
     case requestingDeviceCode
@@ -78,6 +78,7 @@ enum AuthState: Equatable, Sendable {
 @MainActor
 @Observable
 final class AuthService {
+
     // MARK: - Properties
 
     private(set) var state: AuthState = .unknown

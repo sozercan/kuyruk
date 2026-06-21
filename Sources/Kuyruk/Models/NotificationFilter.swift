@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a filter for displaying notifications.
-enum NotificationFilter: Hashable, Identifiable, Sendable {
+enum NotificationFilter: Hashable, Identifiable {
     // Smart filters
     case inbox
     case unread
@@ -11,7 +11,7 @@ enum NotificationFilter: Hashable, Identifiable, Sendable {
     case reviewRequested
     case snoozed
 
-    // Repository filter
+    /// Repository filter
     case repository(Repository)
 
     var id: String {

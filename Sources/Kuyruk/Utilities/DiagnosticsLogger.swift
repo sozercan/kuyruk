@@ -78,7 +78,7 @@ enum DiagnosticsLogger {
 
 extension DiagnosticsLogger {
     /// Categories for organizing log messages
-    enum LogCategory: String, Sendable {
+    enum LogCategory: String {
         case general
         case auth
         case api

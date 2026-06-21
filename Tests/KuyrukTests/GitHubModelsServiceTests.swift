@@ -1,12 +1,12 @@
 import Foundation
 import Testing
-
 @testable import Kuyruk
 
 // MARK: - Mock URLProtocol
 
 /// Custom URLProtocol for mocking network requests in tests.
 final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+
     // MARK: - Static Properties (nonisolated for Sendable compliance)
 
     nonisolated(unsafe) static var mockData: Data?
@@ -14,6 +14,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var mockError: Error?
     nonisolated(unsafe) static var requestCount = 0
     nonisolated(unsafe) static var lastRequest: URLRequest?
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     // MARK: - URLProtocol Overrides
 
@@ -31,6 +32,18 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 
         if let error = Self.mockError {
             self.client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        if let requestHandler = Self.requestHandler {
+            do {
+                let (response, data) = try requestHandler(self.request)
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: data)
+                self.client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                self.client?.urlProtocol(self, didFailWithError: error)
+            }
             return
         }
 
@@ -69,6 +82,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
         self.mockError = nil
         self.requestCount = 0
         self.lastRequest = nil
+        self.requestHandler = nil
     }
 
     static func setMockResponse(statusCode: Int, headers: [String: String]? = nil) {
@@ -159,8 +173,8 @@ enum GitHubModelsTestFixtures {
 
 @Suite("GitHubModel Parsing Tests")
 struct GitHubModelParsingTests {
-    @Test("Decodes model from JSON correctly")
-    func gitHubModelDecoding() throws {
+    @Test
+    func `Decodes model from JSON correctly`() throws {
         let json = GitHubModelsTestFixtures.mockModelsJSON
         guard let data = json.data(using: .utf8) else {
             Issue.record("Failed to convert JSON to data")
@@ -178,8 +192,8 @@ struct GitHubModelParsingTests {
         #expect(models[0].rateLimitTier == "low")
     }
 
-    @Test("Decodes model with missing optional fields")
-    func gitHubModelWithMissingOptionals() throws {
+    @Test
+    func `Decodes model with missing optional fields`() throws {
         let json = GitHubModelsTestFixtures.mockModelMissingOptionals
         guard let data = json.data(using: .utf8) else {
             Issue.record("Failed to convert JSON to data")
@@ -197,8 +211,8 @@ struct GitHubModelParsingTests {
         #expect(models[0].rateLimitTier == nil)
     }
 
-    @Test("Model display name combines publisher and name")
-    func testDisplayName() throws {
+    @Test
+    func `Model display name combines publisher and name`() throws {
         let json = GitHubModelsTestFixtures.mockModelsJSON
         guard let data = json.data(using: .utf8) else {
             Issue.record("Failed to convert JSON to data")
@@ -211,8 +225,8 @@ struct GitHubModelParsingTests {
         #expect(models[0].displayName == "OpenAI/GPT-4o mini")
     }
 
-    @Test("Model isLowTier detects low tier correctly")
-    func testIsLowTier() throws {
+    @Test
+    func `Model isLowTier detects low tier correctly`() throws {
         let json = GitHubModelsTestFixtures.mockMultipleModelsJSON
         guard let data = json.data(using: .utf8) else {
             Issue.record("Failed to convert JSON to data")
@@ -229,8 +243,8 @@ struct GitHubModelParsingTests {
         #expect(highTierModel?.isLowTier == false)
     }
 
-    @Test("Model conforms to Hashable")
-    func hashable() throws {
+    @Test
+    func `Model conforms to Hashable`() throws {
         let json = GitHubModelsTestFixtures.mockModelsJSON
         guard let data = json.data(using: .utf8) else {
             Issue.record("Failed to convert JSON to data")
@@ -252,8 +266,8 @@ struct GitHubModelParsingTests {
 
 @Suite("CachedSummary Tests")
 struct CachedSummaryTests {
-    @Test("Summary is valid when notification not updated")
-    func cachedSummaryIsValidWhenNotificationNotUpdated() {
+    @Test
+    func `Summary is valid when notification not updated`() {
         let summaryDate = Date()
         let notificationDate = summaryDate.addingTimeInterval(-60) // Notification updated 1 min ago
 
@@ -270,8 +284,8 @@ struct CachedSummaryTests {
         #expect(summary.isValid(for: notification))
     }
 
-    @Test("Summary is invalid when notification updated after summary")
-    func cachedSummaryIsInvalidWhenNotificationUpdated() {
+    @Test
+    func `Summary is invalid when notification updated after summary`() {
         let summaryDate = Date().addingTimeInterval(-120) // Summary from 2 min ago
         let notificationDate = Date() // Notification just updated
 
@@ -288,8 +302,8 @@ struct CachedSummaryTests {
         #expect(!summary.isValid(for: notification))
     }
 
-    @Test("Summary stores generation metadata")
-    func summaryMetadata() {
+    @Test
+    func `Summary stores generation metadata`() {
         let beforeCreation = Date()
 
         let summary = CachedSummary(
@@ -310,6 +324,7 @@ struct CachedSummaryTests {
 @Suite("GitHubModelsService API Tests", .serialized)
 @MainActor
 struct GitHubModelsServiceAPITests {
+
     // MARK: - Setup
 
     /// Creates a URLSession configured with MockURLProtocol.
@@ -323,16 +338,15 @@ struct GitHubModelsServiceAPITests {
     /// Creates a mock AuthService that returns a test token.
     private func createMockAuthService() throws -> AuthService {
         // Create AuthService in authenticated state
-        let authService = AuthService()
+        AuthService()
         // We'll work around this by using a real auth service that we've configured
         // For testing purposes, we need the service to provide a token
-        return authService
     }
 
     // MARK: - Fetch Models Tests
 
-    @Test("Fetches available models successfully")
-    func fetchAvailableModelsSuccess() async throws {
+    @Test
+    func `Fetches available models successfully`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockMultipleModelsJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -354,8 +368,8 @@ struct GitHubModelsServiceAPITests {
         #expect(service.isLoadingModels == false)
     }
 
-    @Test("Handles fetch models error gracefully")
-    func fetchAvailableModelsError() async throws {
+    @Test
+    func `Handles fetch models error gracefully`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockError = URLError(.notConnectedToInternet)
 
@@ -374,8 +388,8 @@ struct GitHubModelsServiceAPITests {
         #expect(service.availableModels.isEmpty || service.modelsError != nil)
     }
 
-    @Test("Handles rate limit response")
-    func fetchModelsRateLimited() async throws {
+    @Test
+    func `Handles rate limit response`() async throws {
         let session = self.createMockSession()
         let resetTime = Date().addingTimeInterval(3600).timeIntervalSince1970
         MockURLProtocol.setMockResponse(
@@ -400,8 +414,8 @@ struct GitHubModelsServiceAPITests {
 
     // MARK: - Generate Summary Tests
 
-    @Test("Generate summary returns content")
-    func generateSummaryReturnsContent() async throws {
+    @Test
+    func `Generate summary returns content`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -430,8 +444,8 @@ struct GitHubModelsServiceAPITests {
         }
     }
 
-    @Test("Cancel current generation cancels task")
-    func cancelCurrentGenerationCancelsTask() async throws {
+    @Test
+    func `Cancel current generation cancels task`() throws {
         let session = self.createMockSession()
         // Set up a slow response by just using normal mock
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
@@ -454,8 +468,8 @@ struct GitHubModelsServiceAPITests {
         #expect(service.isLoadingModels == false)
     }
 
-    @Test("Can generate summaries returns false without model")
-    func canGenerateSummariesWithoutModel() async throws {
+    @Test
+    func `Can generate summaries returns false without model`() throws {
         let dataStore = try DataStore(inMemory: true)
         let authService = AuthService()
 
@@ -470,8 +484,8 @@ struct GitHubModelsServiceAPITests {
         #expect(service.canGenerateSummaries == false)
     }
 
-    @Test("Is rate limited when remaining is zero")
-    func testIsRateLimited() async throws {
+    @Test
+    func `Is rate limited when remaining is zero`() throws {
         let session = self.createMockSession()
         let dataStore = try DataStore(inMemory: true)
         let authService = AuthService()
@@ -487,8 +501,8 @@ struct GitHubModelsServiceAPITests {
 
     // MARK: - Custom Backend Tests
 
-    @Test("Custom backend targets the configured base URL and OpenAI chat path")
-    func customBackendChatRequestURL() async throws {
+    @Test
+    func `Custom backend targets the configured base URL and OpenAI chat path`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -513,8 +527,8 @@ struct GitHubModelsServiceAPITests {
         #expect(lastURL == "http://localhost:1337/v1/chat/completions")
     }
 
-    @Test("Custom backend sends API key as bearer when set")
-    func customBackendSendsBearer() async throws {
+    @Test
+    func `Custom backend sends API key as bearer when set`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -541,8 +555,8 @@ struct GitHubModelsServiceAPITests {
         service.customAPIKey = nil
     }
 
-    @Test("Custom backend omits authorization header when no API key")
-    func customBackendOmitsBearerWithoutKey() async throws {
+    @Test
+    func `Custom backend omits authorization header when no API key`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockCompletionJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -567,8 +581,8 @@ struct GitHubModelsServiceAPITests {
         #expect(auth == nil)
     }
 
-    @Test("Custom backend decodes OpenAI model list")
-    func customBackendDecodesModelList() async throws {
+    @Test
+    func `Custom backend decodes OpenAI model list`() async throws {
         let session = self.createMockSession()
         MockURLProtocol.mockData = GitHubModelsTestFixtures.mockOpenAIModelsJSON.data(using: .utf8)
         MockURLProtocol.setMockResponse(statusCode: 200)
@@ -593,8 +607,109 @@ struct GitHubModelsServiceAPITests {
         #expect(url == "http://localhost:1337/v1/models")
     }
 
-    @Test("Custom backend is ready to generate without GitHub auth")
-    func customBackendReadyWithoutAuth() async throws {
+    @Test
+    func `Custom backend queues latest model fetch while another fetch is active`() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else { throw GitHubError.invalidResponse }
+            Thread.sleep(forTimeInterval: 0.05)
+
+            let modelId = url.absoluteString.contains("/final/") ? "final-model" : "stale-model"
+            let payload = """
+            {"object":"list","data":[{"id":"\(modelId)","object":"model"}]}
+            """
+            guard let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil),
+                let data = payload.data(using: .utf8) else {
+                throw GitHubError.invalidResponse
+            }
+            return (response, data)
+        }
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1"
+
+        let firstFetch = Task { @MainActor in
+            await service.fetchAvailableModels()
+        }
+
+        try await Task.sleep(for: .milliseconds(10))
+        service.customBaseURL = "http://localhost:1337/final/v1"
+        await service.fetchAvailableModels()
+
+        await firstFetch.value
+
+        #expect(MockURLProtocol.requestCount == 2)
+        #expect(service.availableModels.map(\.id) == ["final-model"])
+        #expect(service.selectedModelId == "final-model")
+        let url = try #require(MockURLProtocol.lastRequest?.url?.absoluteString)
+        #expect(url == "http://localhost:1337/final/v1/models")
+        #expect(service.modelsError == nil)
+    }
+
+    @Test
+    func `Custom backend ignores stale model fetch when latest endpoint fails`() async throws {
+        let session = self.createMockSession()
+        MockURLProtocol.requestHandler = { request in
+            guard let url = request.url else { throw GitHubError.invalidResponse }
+            Thread.sleep(forTimeInterval: 0.05)
+
+            guard !url.absoluteString.contains("/final/") else {
+                throw GitHubError.networkError("final endpoint unavailable")
+            }
+
+            let payload = """
+            {"object":"list","data":[{"id":"stale-model","object":"model"}]}
+            """
+            guard let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil),
+                let data = payload.data(using: .utf8) else {
+                throw GitHubError.invalidResponse
+            }
+            return (response, data)
+        }
+
+        let dataStore = try DataStore(inMemory: true)
+        let service = GitHubModelsService(
+            authService: AuthService(),
+            dataStore: dataStore,
+            session: session)
+        defer { Self.resetBackend(service) }
+
+        service.backend = .custom
+        service.customBaseURL = "http://localhost:1337/v1"
+
+        let firstFetch = Task { @MainActor in
+            await service.fetchAvailableModels()
+        }
+
+        try await Task.sleep(for: .milliseconds(10))
+        service.customBaseURL = "http://localhost:1337/final/v1"
+        await service.fetchAvailableModels()
+
+        await firstFetch.value
+
+        #expect(MockURLProtocol.requestCount == 2)
+        #expect(service.availableModels.isEmpty)
+        #expect(service.selectedModelId == nil)
+        #expect(service.modelsError != nil)
+    }
+
+    @Test
+    func `Custom backend is ready to generate without GitHub auth`() throws {
         let dataStore = try DataStore(inMemory: true)
         let service = GitHubModelsService(
             authService: AuthService(),
@@ -616,8 +731,8 @@ struct GitHubModelsServiceAPITests {
         #expect(service.canGenerateSummaries == true)
     }
 
-    @Test("Switching backend resets the selected model")
-    func switchingBackendResetsSelection() async throws {
+    @Test
+    func `Switching backend resets the selected model`() throws {
         let dataStore = try DataStore(inMemory: true)
         let service = GitHubModelsService(
             authService: AuthService(),
@@ -647,8 +762,8 @@ struct GitHubModelsServiceAPITests {
 @Suite("DataStore Summary Tests", .serialized)
 @MainActor
 struct DataStoreSummaryTests {
-    @Test("Summary uses cached value without API call")
-    func generateSummaryUsesCachedValue() async throws {
+    @Test
+    func `Summary uses cached value without API call`() throws {
         let dataStore = try DataStore(inMemory: true)
         let notification = GitHubModelsTestFixtures.makeNotification(id: "cached-test")
 
@@ -666,8 +781,8 @@ struct DataStoreSummaryTests {
         #expect(cached?.modelUsed == "openai/gpt-4o-mini")
     }
 
-    @Test("Summary can be invalidated")
-    func summaryInvalidation() async throws {
+    @Test
+    func `Summary can be invalidated`() throws {
         let dataStore = try DataStore(inMemory: true)
         let notification = GitHubModelsTestFixtures.makeNotification(id: "invalidate-test")
 
@@ -689,8 +804,8 @@ struct DataStoreSummaryTests {
         #expect(after == nil)
     }
 
-    @Test("Cleanup old summaries removes stale entries")
-    func testCleanupOldSummaries() async throws {
+    @Test
+    func `Cleanup old summaries removes stale entries`() throws {
         let dataStore = try DataStore(inMemory: true)
         let notification = GitHubModelsTestFixtures.makeNotification(id: "cleanup-test")
 
@@ -710,8 +825,8 @@ struct DataStoreSummaryTests {
         _ = result
     }
 
-    @Test("Save summary updates existing entry")
-    func saveSummaryUpdatesExisting() async throws {
+    @Test
+    func `Save summary updates existing entry`() throws {
         let dataStore = try DataStore(inMemory: true)
         let notification = GitHubModelsTestFixtures.makeNotification(id: "update-test")
 
@@ -740,8 +855,8 @@ struct DataStoreSummaryTests {
 @Suite("NotificationsViewModel AI Cache Tests", .serialized)
 @MainActor
 struct NotificationsViewModelAICacheTests {
-    @Test("ViewModel returns cached summary for notification")
-    func cachedSummaryAccess() async throws {
+    @Test
+    func `ViewModel returns cached summary for notification`() throws {
         // Create dependencies
         let dataStore = try DataStore(inMemory: true)
         let authService = AuthService()
@@ -767,8 +882,8 @@ struct NotificationsViewModelAICacheTests {
         #expect(cached?.summary == "ViewModel cached summary")
     }
 
-    @Test("ViewModel returns nil for uncached notification")
-    func noCachedSummary() async throws {
+    @Test
+    func `ViewModel returns nil for uncached notification`() throws {
         let dataStore = try DataStore(inMemory: true)
         let authService = AuthService()
         let gitHubClient = GitHubClient(authService: authService)
@@ -786,8 +901,8 @@ struct NotificationsViewModelAICacheTests {
         #expect(cached == nil)
     }
 
-    @Test("ViewModel invalidates summary cache")
-    func testInvalidateSummaryCache() async throws {
+    @Test
+    func `ViewModel invalidates summary cache`() throws {
         let dataStore = try DataStore(inMemory: true)
         let authService = AuthService()
         let gitHubClient = GitHubClient(authService: authService)

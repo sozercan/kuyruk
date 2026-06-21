@@ -7,6 +7,7 @@ typealias NotificationUpdateHandler = @MainActor @Sendable ([GitHubNotification]
 @MainActor
 @Observable
 final class SyncService {
+
     // MARK: - Properties
 
     /// Current sync status

@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 @Observable
 final class NotificationsViewModel {
+
     // MARK: - Properties
 
     /// All notifications
@@ -63,7 +64,7 @@ final class NotificationsViewModel {
     /// Debounced search text (actually applied to filtering)
     private var debouncedSearchText: String = ""
 
-    private let gitHubClient: GitHubClient
+    private let gitHubClient: any GitHubClienting
     private let dataStore: DataStore
     private let syncService: SyncService
 
@@ -101,7 +102,7 @@ final class NotificationsViewModel {
 
     // MARK: - Initialization
 
-    init(gitHubClient: GitHubClient, dataStore: DataStore, syncService: SyncService) {
+    init(gitHubClient: any GitHubClienting, dataStore: DataStore, syncService: SyncService) {
         self.gitHubClient = gitHubClient
         self.dataStore = dataStore
         self.syncService = syncService
@@ -209,11 +210,13 @@ final class NotificationsViewModel {
 
         do {
             // Use progressive fetch to update UI as pages arrive
-            let finalNotifications = try await self.gitHubClient.fetchAllNotificationsProgressive { [weak self] batch in
-                guard let self else { return }
-                // Update UI immediately with each batch
-                self.mergeNotifications(batch)
-            }
+            let finalNotifications = try await self.gitHubClient.fetchAllNotificationsProgressive(
+                all: false,
+                participating: false) { [weak self] batch in
+                    guard let self else { return }
+                    // Update UI immediately with each batch
+                    self.mergeNotifications(batch)
+                }
 
             if let notifications = finalNotifications {
                 // Final merge to ensure consistency
@@ -256,7 +259,9 @@ final class NotificationsViewModel {
         self.error = nil
 
         do {
-            let notifications = try await self.gitHubClient.fetchAllNotificationsForced()
+            let notifications = try await self.gitHubClient.fetchAllNotificationsForced(
+                all: false,
+                participating: false)
             self.mergeNotifications(notifications)
             let currentNotificationIds = Set(notifications.map(\.id))
 
@@ -463,36 +468,35 @@ final class NotificationsViewModel {
         try? self.dataStore.cleanupOldNotifications()
     }
 
-    /// Prepares missing digest analyses for pull request notifications.
-    func prepareDigest(using modelsService: any DigestPreparingModelsService) async {
+    /// Prepares digest state for pull request notifications.
+    ///
+    /// Pull request resolution state is refreshed independently from AI analysis
+    /// generation so cached recommendations for merged/closed PRs can be filtered out.
+    func prepareDigest(
+        using modelsService: any DigestPreparingModelsService,
+        allowsAnalysisGeneration: Bool = true) async {
         let runID = UUID()
         self.digestPreparationRunID = runID
 
-        guard modelsService.canGenerateSummaries else {
-            self.resetDigestPreparationState()
-            return
-        }
-
         let pullRequestNotifications = self.pullRequestNotificationsForDigest()
         self.digestEvaluatedPRCount = 0
-        self.digestPendingPRAnalysisCount = pullRequestNotifications.count(where: {
-            !self.hasCompleteDigestAnalyses(for: $0)
-        })
-        self.isPreparingDigest = self.digestPendingPRAnalysisCount > 0
+
+        let canGenerateSummaries = allowsAnalysisGeneration && modelsService.canGenerateSummaries
+        self.digestPendingPRAnalysisCount = canGenerateSummaries
+            ? pullRequestNotifications.count(where: { !self.hasCompleteDigestAnalyses(for: $0) })
+            : 0
+        self.isPreparingDigest = canGenerateSummaries && self.digestPendingPRAnalysisCount > 0
 
         guard !pullRequestNotifications.isEmpty else { return }
 
-        guard self.isPreparingDigest else {
-            self.digestEvaluatedPRCount = pullRequestNotifications.count
-            return
+        if self.isPreparingDigest {
+            DiagnosticsLogger.info(
+                """
+                Preparing digest analyses for \(pullRequestNotifications.count) pull requests \
+                with model \(modelsService.selectedModelId ?? "unknown")
+                """,
+                category: .ui)
         }
-
-        DiagnosticsLogger.info(
-            """
-            Preparing digest analyses for \(pullRequestNotifications.count) pull requests \
-            with model \(modelsService.selectedModelId ?? "unknown")
-            """,
-            category: .ui)
 
         defer {
             if self.digestPreparationRunID == runID {
@@ -505,18 +509,28 @@ final class NotificationsViewModel {
                 try Task.checkCancellation()
                 guard self.digestPreparationRunID == runID else { return }
 
+                let missingTypes = canGenerateSummaries
+                    ? self.missingDigestAnalysisTypes(for: notification)
+                    : []
+
                 // Resolve PR state first; skip AI evaluation for merged/closed PRs.
                 let status = await self.ensurePullRequestState(for: notification)
 
                 guard self.digestPreparationRunID == runID else { return }
 
                 if status?.isResolved == true {
-                    self.digestPendingPRAnalysisCount = max(0, self.digestPendingPRAnalysisCount - 1)
+                    if !missingTypes.isEmpty {
+                        self.digestPendingPRAnalysisCount = max(0, self.digestPendingPRAnalysisCount - 1)
+                    }
                     self.digestEvaluatedPRCount += 1
                     continue
                 }
 
-                let missingTypes = self.missingDigestAnalysisTypes(for: notification)
+                guard canGenerateSummaries else {
+                    self.digestEvaluatedPRCount += 1
+                    continue
+                }
+
                 var generatedAnalysis = false
 
                 for type in missingTypes {
