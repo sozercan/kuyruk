@@ -146,6 +146,7 @@ final class GitHubModelsService: DigestPreparingModelsService {
             guard self.backend != oldValue else { return }
             UserDefaults.standard.set(self.backend.rawValue, forKey: Constants.backendKey)
             self.resetForBackendChange()
+            self.invalidateSummariesForBackendSwitch()
         }
     }
 
@@ -709,6 +710,18 @@ final class GitHubModelsService: DigestPreparingModelsService {
         self.selectedModelId = nil
         self.availableModels = []
         self.modelsError = nil
+    }
+
+    /// Invalidates cached summaries when switching between AI backends. Analyses are
+    /// not keyed by backend/model, so without this the previous backend's cached
+    /// output would keep showing until each thread next updates. Scoped to backend
+    /// transitions (not every custom-URL keystroke) to avoid needless cache churn.
+    private func invalidateSummariesForBackendSwitch() {
+        do {
+            try self.dataStore.cleanupOldSummaries(olderThan: 0)
+        } catch {
+            DiagnosticsLogger.error(error, context: "invalidateSummariesForBackendSwitch", category: .api)
+        }
     }
 
     /// Writes the custom API key through to the Keychain.

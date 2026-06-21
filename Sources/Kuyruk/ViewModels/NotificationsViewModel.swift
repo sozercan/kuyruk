@@ -146,6 +146,8 @@ final class NotificationsViewModel {
     func loadFromCache() async {
         DiagnosticsLogger.info("Loading notifications from cache", category: .ui)
 
+        self.pruneStaleCaches()
+
         do {
             let cached = try self.dataStore.fetchCachedNotifications()
 
@@ -452,6 +454,13 @@ final class NotificationsViewModel {
     /// This removes all cached AI-generated summaries from the store.
     func invalidateSummaryCache() {
         try? self.dataStore.cleanupOldSummaries(olderThan: 0)
+    }
+
+    /// Removes aged cache entries to bound local storage growth. Runs once at startup.
+    private func pruneStaleCaches() {
+        try? self.dataStore.cleanupOldSummaries()
+        try? self.dataStore.cleanupOldPullRequestStates()
+        try? self.dataStore.cleanupOldNotifications()
     }
 
     /// Prepares missing digest analyses for pull request notifications.

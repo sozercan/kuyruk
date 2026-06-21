@@ -41,6 +41,7 @@ What becomes easier or more difficult to do because of this change?
 | [0005](0005-swiftdata-persistence.md) | SwiftData for Local Persistence | Accepted |
 | [0006](0006-github-models-integration.md) | GitHub Models Integration for AI Summaries | Accepted |
 | [0007](0007-notification-merge-semantics.md) | API Fetch as Source of Truth for Notification Merge | Accepted |
+| [0008](0008-configurable-ai-backend.md) | Configurable AI Backend (BYO OpenAI-compatible proxy) | Accepted |
 
 ## Creating a New ADR
 

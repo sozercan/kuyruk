@@ -810,7 +810,7 @@ private struct DigestRecommendationRow: View {
                         .foregroundStyle(.blue)
                         .padding(.top, 2)
 
-                    Text(actionRecommendation)
+                    Text(Self.formattedText(actionRecommendation))
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
@@ -822,7 +822,7 @@ private struct DigestRecommendationRow: View {
                 .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            Text(self.item.summaryText)
+            Text(Self.formattedText(self.item.summaryText))
                 .font(self.item.hasActionRecommendation ? .caption : .subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
@@ -841,6 +841,14 @@ private struct DigestRecommendationRow: View {
         }
         .contentShape(Rectangle())
         .help(self.item.priorityExplanation ?? self.item.actionRecommendation ?? "")
+    }
+
+    /// Renders inline markdown (e.g. `**bold**`) in generated text, preserving
+    /// whitespace, and falls back to the raw string if parsing fails.
+    private static func formattedText(_ value: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: value, options: options)) ?? AttributedString(value)
     }
 }
 
