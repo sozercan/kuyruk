@@ -421,8 +421,15 @@ private struct PullRequestFetch: Equatable {
 private final class MockDigestGitHubClient: GitHubClienting {
     var isCacheValid = false
     var hasConditionalHeaders = false
+    var cachedNotificationCount: Int?
     var notifications: [GitHubNotification]
+    var returnsNotModified = false
+    var returnsNilAfterBatch = false
+    var progressiveResult: [GitHubNotification]?
+    var forcedNotifications: [GitHubNotification]?
     var pullRequestResponse = PullRequestStateResponse(state: "open", merged: false, draft: false)
+    private(set) var progressiveFetchCount = 0
+    private(set) var forcedFetchCount = 0
     private(set) var pullRequestFetches: [PullRequestFetch] = []
 
     init(notifications: [GitHubNotification]) {
@@ -433,14 +440,18 @@ private final class MockDigestGitHubClient: GitHubClienting {
         all: Bool,
         participating: Bool,
         onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification]? {
-        onBatchReceived(self.notifications)
-        return self.notifications
+        self.progressiveFetchCount += 1
+        guard !self.returnsNotModified else { return nil }
+        let progressiveResult = self.progressiveResult ?? self.notifications
+        onBatchReceived(progressiveResult)
+        return self.returnsNilAfterBatch ? nil : progressiveResult
     }
 
     func fetchAllNotificationsForced(
         all: Bool,
         participating: Bool) async throws -> [GitHubNotification] {
-        self.notifications
+        self.forcedFetchCount += 1
+        return self.forcedNotifications ?? self.notifications
     }
 
     func updateCachedNotification(_ notification: GitHubNotification) {}
@@ -465,6 +476,82 @@ private final class MockDigestModelsService: DigestPreparingModelsService {
     func generateAnalysis(for notification: GitHubNotification, type: AnalysisType) async throws -> String {
         self.generatedTypes.append(type)
         return "Generated \(type.rawValue)"
+    }
+}
+
+// MARK: - Notifications ViewModel Refresh Tests
+
+@Suite(.serialized)
+@MainActor
+struct NotificationsViewModelRefreshTests {
+    @Test
+    func `Refresh forces fetch when conditional response leaves empty UI cache`() async throws {
+        let notification = KuyrukTests.makeNotification(id: "thread-304", type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        let gitHubClient = MockDigestGitHubClient(notifications: [])
+        gitHubClient.hasConditionalHeaders = true
+        gitHubClient.returnsNotModified = true
+        gitHubClient.forcedNotifications = [notification]
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+
+        await viewModel.refresh()
+
+        #expect(gitHubClient.progressiveFetchCount == 1)
+        #expect(gitHubClient.forcedFetchCount == 1)
+        #expect(viewModel.unreadCount == 1)
+        #expect(viewModel.notifications.map(\.id) == ["thread-304"])
+        #expect(try dataStore.fetchCachedNotifications().map(\.id) == ["thread-304"])
+    }
+
+    @Test
+    func `Refresh does not force fetch when empty cached batch was delivered`() async throws {
+        let notification = KuyrukTests.makeNotification(id: "thread-should-not-load", type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        let gitHubClient = MockDigestGitHubClient(notifications: [])
+        gitHubClient.hasConditionalHeaders = true
+        gitHubClient.progressiveResult = []
+        gitHubClient.returnsNilAfterBatch = true
+        gitHubClient.forcedNotifications = [notification]
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+
+        await viewModel.refresh()
+
+        #expect(gitHubClient.progressiveFetchCount == 1)
+        #expect(gitHubClient.forcedFetchCount == 0)
+        #expect(viewModel.unreadCount == 0)
+        #expect(viewModel.notifications.isEmpty)
+    }
+
+    @Test
+    func `Refresh does not force fetch when conditional response matches known empty inbox`() async throws {
+        let notification = KuyrukTests.makeNotification(id: "thread-should-not-load", type: .pullRequest)
+        let dataStore = try DataStore(inMemory: true)
+        let gitHubClient = MockDigestGitHubClient(notifications: [])
+        gitHubClient.hasConditionalHeaders = true
+        gitHubClient.cachedNotificationCount = 0
+        gitHubClient.returnsNotModified = true
+        gitHubClient.forcedNotifications = [notification]
+        let viewModel = self.makeViewModel(gitHubClient: gitHubClient, dataStore: dataStore)
+
+        await viewModel.refresh()
+
+        #expect(gitHubClient.progressiveFetchCount == 1)
+        #expect(gitHubClient.forcedFetchCount == 0)
+        #expect(viewModel.unreadCount == 0)
+        #expect(viewModel.notifications.isEmpty)
+    }
+
+    private func makeViewModel(
+        gitHubClient: MockDigestGitHubClient,
+        dataStore: DataStore) -> NotificationsViewModel {
+        let authService = AuthService()
+        let realGitHubClient = GitHubClient(authService: authService, enablePinning: false)
+        let syncService = SyncService(gitHubClient: realGitHubClient, dataStore: dataStore)
+
+        return NotificationsViewModel(
+            gitHubClient: gitHubClient,
+            dataStore: dataStore,
+            syncService: syncService)
     }
 }
 

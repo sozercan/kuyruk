@@ -209,11 +209,14 @@ final class NotificationsViewModel {
         DiagnosticsLogger.info("Refreshing notifications (silent: \(canSilentRefresh))", category: .ui)
 
         do {
+            var receivedProgressiveBatch = false
+
             // Use progressive fetch to update UI as pages arrive
             let finalNotifications = try await self.gitHubClient.fetchAllNotificationsProgressive(
                 all: false,
                 participating: false) { [weak self] batch in
                     guard let self else { return }
+                    receivedProgressiveBatch = true
                     // Update UI immediately with each batch
                     self.mergeNotifications(batch)
                 }
@@ -240,6 +243,22 @@ final class NotificationsViewModel {
             } else {
                 // 304 Not Modified - data unchanged
                 DiagnosticsLogger.info("Notifications unchanged, using cache", category: .ui)
+
+                if self.notifications.isEmpty,
+                   !receivedProgressiveBatch,
+                   self.gitHubClient.hasConditionalHeaders,
+                   self.gitHubClient.cachedNotificationCount != 0 {
+                    DiagnosticsLogger.warning(
+                        "Received 304 with an empty UI cache; forcing notification refresh",
+                        category: .ui)
+                    let notifications = try await self.gitHubClient.fetchAllNotificationsForced(
+                        all: false,
+                        participating: false)
+                    self.mergeNotifications(notifications)
+                    try self.dataStore.markDeletedNotifications(currentIds: Set(notifications.map(\.id)))
+                    try self.dataStore.saveNotifications(self.notifications)
+                    try self.dataStore.saveRepositories(self.repositories)
+                }
             }
 
             // Prefetch avatars for new items
