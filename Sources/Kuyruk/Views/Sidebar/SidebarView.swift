@@ -11,11 +11,10 @@ struct SidebarView: View {
     ]
 
     var body: some View {
-        @Bindable var vm = self.viewModel
-
         VStack(spacing: 0) {
+            self.destinationPicker
             self.filterCardsGrid
-            self.repositoriesList(selection: $vm.selectedFilter)
+            self.repositoriesList(selection: self.notificationSelection)
 
             // Sync status at bottom
             SyncStatusBar()
@@ -26,17 +25,27 @@ struct SidebarView: View {
 
     // MARK: - Filter Cards Grid
 
-    @ViewBuilder
     private var filterCardsGrid: some View {
-        @Bindable var vm = self.viewModel
-
-        self.filterGridContent(selection: $vm.selectedFilter)
+        self.filterGridContent(selection: self.notificationSelection)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
     }
 
-    @ViewBuilder
-    private func filterGridContent(selection: Binding<NotificationFilter>) -> some View {
+    private var destinationPicker: some View {
+        Picker("Destination", selection: self.appDestinationSelection) {
+            ForEach(AppDestination.allCases) { destination in
+                Label(destination.displayName, systemImage: destination.iconName)
+                    .tag(destination)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    private func filterGridContent(selection: Binding<NotificationFilter?>) -> some View {
         LazyVGrid(columns: self.filterGridColumns, spacing: 8) {
             ForEach(NotificationFilter.smartFilters) { filter in
                 FilterCardView(
@@ -52,8 +61,7 @@ struct SidebarView: View {
 
     // MARK: - Repositories List
 
-    @ViewBuilder
-    private func repositoriesList(selection: Binding<NotificationFilter>) -> some View {
+    private func repositoriesList(selection: Binding<NotificationFilter?>) -> some View {
         List(selection: selection) {
             if !self.viewModel.repositories.isEmpty {
                 Section("Repositories") {
@@ -67,7 +75,6 @@ struct SidebarView: View {
         .listStyle(.sidebar)
     }
 
-    @ViewBuilder
     private func repositoryRow(for repo: Repository) -> some View {
         HStack(spacing: 8) {
             AvatarView(url: repo.owner.avatarUrl, size: 20)
@@ -91,6 +98,31 @@ struct SidebarView: View {
     }
 
     // MARK: - Helpers
+
+    private var appDestinationSelection: Binding<AppDestination> {
+        Binding(
+            get: { self.viewModel.appDestination },
+            set: { destination in
+                switch destination {
+                case .notifications:
+                    self.viewModel.showNotifications()
+                case .digest:
+                    self.viewModel.showDigest()
+                }
+            })
+    }
+
+    private var notificationSelection: Binding<NotificationFilter?> {
+        Binding(
+            get: {
+                guard self.viewModel.appDestination == .notifications else { return nil }
+                return self.viewModel.selectedFilter
+            },
+            set: { filter in
+                guard let filter else { return }
+                self.viewModel.selectFilter(filter)
+            })
+    }
 
     private func count(for filter: NotificationFilter) -> Int {
         self.viewModel.notifications.count(where: { filter.matches($0) })

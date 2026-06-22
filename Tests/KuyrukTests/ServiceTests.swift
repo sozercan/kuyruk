@@ -1,14 +1,12 @@
 import Foundation
 import Testing
-
 @testable import Kuyruk
 
 // MARK: - GitHubError Tests
 
-@Suite("GitHubError Tests")
 struct GitHubErrorTests {
-    @Test("GitHubError has correct error descriptions")
-    func gitHubErrorDescriptions() {
+    @Test
+    func `GitHubError has correct error descriptions`() throws {
         let errors: [GitHubError] = [
             .unauthorized,
             .authenticationFailed("test message"),
@@ -24,25 +22,25 @@ struct GitHubErrorTests {
         ]
 
         for error in errors {
-            #expect(error.errorDescription != nil)
-            #expect(!error.errorDescription!.isEmpty)
+            let description = try #require(error.errorDescription)
+            #expect(!description.isEmpty)
         }
     }
 
-    @Test("HTTP error includes status code")
-    func httpErrorIncludesStatusCode() {
+    @Test
+    func `HTTP error includes status code`() {
         let error = GitHubError.httpError(404)
         #expect(error.errorDescription?.contains("404") == true)
     }
 
-    @Test("Authentication failed includes message")
-    func authFailedIncludesMessage() {
+    @Test
+    func `Authentication failed includes message`() {
         let error = GitHubError.authenticationFailed("Invalid token")
         #expect(error.errorDescription?.contains("Invalid token") == true)
     }
 
-    @Test("Rate limited includes reset date when provided")
-    func rateLimitedWithDate() {
+    @Test
+    func `Rate limited includes reset date when provided`() {
         let resetDate = Date()
         let error = GitHubError.rateLimited(resetDate: resetDate)
         #expect(error.errorDescription?.contains("Rate limit") == true)
@@ -51,17 +49,16 @@ struct GitHubErrorTests {
 
 // MARK: - GitHubEndpoint Tests
 
-@Suite("GitHubEndpoint Tests")
 struct GitHubEndpointTests {
-    @Test("Notifications endpoint path is correct")
-    func notificationsPath() {
+    @Test
+    func `Notifications endpoint path is correct`() {
         let endpoint = GitHubEndpoint.notifications(all: false, participating: false, page: 1)
         #expect(endpoint.path == "/notifications")
         #expect(endpoint.method == "GET")
     }
 
-    @Test("Notifications endpoint query items are correct")
-    func notificationsQueryItems() {
+    @Test
+    func `Notifications endpoint query items are correct`() {
         let endpoint = GitHubEndpoint.notifications(all: true, participating: true, page: 2)
         let queryItems = endpoint.queryItems
 
@@ -72,51 +69,51 @@ struct GitHubEndpointTests {
         #expect(queryItems?.contains { $0.name == "per_page" && $0.value == "50" } == true)
     }
 
-    @Test("Page 1 does not include page query item")
-    func page1NoQueryItem() {
+    @Test
+    func `Page 1 does not include page query item`() {
         let endpoint = GitHubEndpoint.notifications(all: false, participating: false, page: 1)
         let queryItems = endpoint.queryItems
 
         #expect(queryItems?.contains { $0.name == "page" } == false)
     }
 
-    @Test("Mark thread as read endpoint is correct")
-    func markThreadAsReadPath() {
+    @Test
+    func `Mark thread as read endpoint is correct`() {
         let endpoint = GitHubEndpoint.markThreadAsRead(threadId: "12345")
         #expect(endpoint.path == "/notifications/threads/12345")
         #expect(endpoint.method == "PATCH")
     }
 
-    @Test("User endpoint is correct")
-    func userPath() {
+    @Test
+    func `User endpoint is correct`() {
         let endpoint = GitHubEndpoint.user
         #expect(endpoint.path == "/user")
         #expect(endpoint.method == "GET")
     }
 
-    @Test("Repository endpoint path is correct")
-    func repositoryPath() {
+    @Test
+    func `Repository endpoint path is correct`() {
         let endpoint = GitHubEndpoint.repository(owner: "apple", repo: "swift")
         #expect(endpoint.path == "/repos/apple/swift")
         #expect(endpoint.method == "GET")
     }
 
-    @Test("Issue endpoint path is correct")
-    func issuePath() {
+    @Test
+    func `Issue endpoint path is correct`() {
         let endpoint = GitHubEndpoint.issue(owner: "owner", repo: "repo", number: 42)
         #expect(endpoint.path == "/repos/owner/repo/issues/42")
         #expect(endpoint.method == "GET")
     }
 
-    @Test("Pull request endpoint path is correct")
-    func pullRequestPath() {
+    @Test
+    func `Pull request endpoint path is correct`() {
         let endpoint = GitHubEndpoint.pullRequest(owner: "owner", repo: "repo", number: 123)
         #expect(endpoint.path == "/repos/owner/repo/pulls/123")
         #expect(endpoint.method == "GET")
     }
 
-    @Test("Thread subscription endpoint is correct")
-    func threadSubscriptionPath() {
+    @Test
+    func `Thread subscription endpoint is correct`() {
         let endpoint = GitHubEndpoint.threadSubscription(threadId: "999")
         #expect(endpoint.path == "/notifications/threads/999/subscription")
         #expect(endpoint.method == "GET")
@@ -125,18 +122,18 @@ struct GitHubEndpointTests {
 
 // MARK: - DataStore Tests
 
-@Suite("DataStore Tests", .serialized)
+@Suite(.serialized)
 struct DataStoreTests {
-    @Test("DataStore initializes with in-memory storage")
+    @Test
     @MainActor
-    func dataStoreInitializesInMemory() throws {
+    func `DataStore initializes with in-memory storage`() throws {
         let store = try DataStore(inMemory: true)
-        #expect(store.container != nil)
+        #expect(!store.container.mainContext.hasChanges)
     }
 
-    @Test("Save and fetch notifications")
+    @Test
     @MainActor
-    func saveAndFetchNotifications() throws {
+    func `Save and fetch notifications`() throws {
         let store = try DataStore(inMemory: true)
 
         // Create test notifications
@@ -151,9 +148,9 @@ struct DataStoreTests {
         #expect(cached.first?.id == "test-1")
     }
 
-    @Test("Fetch unread notifications")
+    @Test
     @MainActor
-    func fetchUnreadNotifications() throws {
+    func `Fetch unread notifications`() throws {
         let store = try DataStore(inMemory: true)
 
         let unread = ServiceTestHelpers.makeNotification(id: "unread-1", unread: true)
@@ -166,9 +163,9 @@ struct DataStoreTests {
         #expect(unreadNotifications.first?.id == "unread-1")
     }
 
-    @Test("Mark notification as read")
+    @Test
     @MainActor
-    func markNotificationAsRead() throws {
+    func `Mark notification as read`() throws {
         let store = try DataStore(inMemory: true)
 
         let notification = ServiceTestHelpers.makeNotification(id: "to-read", unread: true)
@@ -182,9 +179,9 @@ struct DataStoreTests {
         #expect(cached.first?.unread == false)
     }
 
-    @Test("Unread count is correct")
+    @Test
     @MainActor
-    func unreadCountIsCorrect() throws {
+    func `Unread count is correct`() throws {
         let store = try DataStore(inMemory: true)
 
         let notifications = [
@@ -199,9 +196,9 @@ struct DataStoreTests {
         #expect(count == 2)
     }
 
-    @Test("Save and fetch repositories")
+    @Test
     @MainActor
-    func saveAndFetchRepositories() throws {
+    func `Save and fetch repositories`() throws {
         let store = try DataStore(inMemory: true)
 
         let repo = ServiceTestHelpers.makeRepository(id: 100, name: "test-repo", owner: "test-owner")
@@ -213,9 +210,9 @@ struct DataStoreTests {
         #expect(cached.first?.fullName == "test-owner/test-repo")
     }
 
-    @Test("Mark deleted notifications")
+    @Test
     @MainActor
-    func markDeletedNotifications() throws {
+    func `Mark deleted notifications`() throws {
         let store = try DataStore(inMemory: true)
 
         let notifications = [
@@ -233,9 +230,9 @@ struct DataStoreTests {
         #expect(cached.first?.id == "keep")
     }
 
-    @Test("Update existing notification")
+    @Test
     @MainActor
-    func updateExistingNotification() throws {
+    func `Update existing notification`() throws {
         let store = try DataStore(inMemory: true)
 
         // Save initial
@@ -255,10 +252,9 @@ struct DataStoreTests {
 
 // MARK: - NotificationFilter Extended Tests
 
-@Suite("NotificationFilter Extended Tests")
 struct NotificationFilterExtendedTests {
-    @Test("Repository filter matches only that repository")
-    func repositoryFilterMatches() {
+    @Test
+    func `Repository filter matches only that repository`() {
         let repo1 = ServiceTestHelpers.makeRepository(id: 1, name: "repo-a", owner: "owner")
         let repo2 = ServiceTestHelpers.makeRepository(id: 2, name: "repo-b", owner: "owner")
 
@@ -271,8 +267,8 @@ struct NotificationFilterExtendedTests {
         #expect(!filter.matches(notification2))
     }
 
-    @Test("Participating filter matches participating reasons")
-    func participatingFilterMatches() {
+    @Test
+    func `Participating filter matches participating reasons`() {
         let reasons: [NotificationReason] = [
             .author, .comment, .mention, .reviewRequested,
             .stateChange, .subscribed, .teamMention,
@@ -287,8 +283,8 @@ struct NotificationFilterExtendedTests {
         }
     }
 
-    @Test("Smart filters array contains expected filters")
-    func smartFiltersContainsExpected() {
+    @Test
+    func `Smart filters array contains expected filters`() {
         let filters = NotificationFilter.smartFilters
 
         #expect(filters.contains(.inbox))
@@ -296,8 +292,8 @@ struct NotificationFilterExtendedTests {
         #expect(filters.count >= 4)
     }
 
-    @Test("Filter display names are not empty")
-    func filterDisplayNamesNotEmpty() {
+    @Test
+    func `Filter display names are not empty`() {
         let filters: [NotificationFilter] = [
             .inbox, .unread, .participating, .mentioned,
             .assigned, .reviewRequested,
@@ -308,8 +304,8 @@ struct NotificationFilterExtendedTests {
         }
     }
 
-    @Test("Filter icons are valid SF Symbols")
-    func filterIconsValid() {
+    @Test
+    func `Filter icons are valid SF Symbols`() {
         let filters = NotificationFilter.smartFilters
 
         for filter in filters {
@@ -320,10 +316,9 @@ struct NotificationFilterExtendedTests {
 
 // MARK: - DeviceFlowState Tests
 
-@Suite("DeviceFlowState Tests")
 struct DeviceFlowStateTests {
-    @Test("DeviceFlowState is Equatable")
-    func deviceFlowStateEquatable() {
+    @Test
+    func `DeviceFlowState is Equatable`() {
         let state1 = DeviceFlowState(
             userCode: "ABCD-1234",
             verificationUri: "https://github.com/login/device",
@@ -346,8 +341,8 @@ struct DeviceFlowStateTests {
         #expect(state1 != state3)
     }
 
-    @Test("DeviceFlowState is Sendable")
-    func deviceFlowStateSendable() {
+    @Test
+    func `DeviceFlowState is Sendable`() {
         let state = DeviceFlowState(
             userCode: "TEST-CODE",
             verificationUri: "https://github.com/login/device",
@@ -365,10 +360,9 @@ struct DeviceFlowStateTests {
 
 // MARK: - AuthState Extended Tests
 
-@Suite("AuthState Extended Tests")
 struct AuthStateExtendedTests {
-    @Test("Waiting for user auth state has device flow state")
-    func waitingForUserAuthHasDeviceFlowState() {
+    @Test
+    func `Waiting for user auth state has device flow state`() {
         let deviceState = DeviceFlowState(
             userCode: "CODE-123",
             verificationUri: "https://github.com/login/device",
@@ -383,8 +377,8 @@ struct AuthStateExtendedTests {
         #expect(authState.accessToken == nil)
     }
 
-    @Test("Authenticated state has no device flow state")
-    func authenticatedHasNoDeviceFlowState() {
+    @Test
+    func `Authenticated state has no device flow state`() {
         let authState = AuthState.authenticated("test-token")
 
         #expect(authState.deviceFlowState == nil)
@@ -392,8 +386,8 @@ struct AuthStateExtendedTests {
         #expect(authState.accessToken == "test-token")
     }
 
-    @Test("Error state is not authenticated")
-    func errorStateNotAuthenticated() {
+    @Test
+    func `Error state is not authenticated`() {
         let authState = AuthState.error("Something went wrong")
 
         #expect(!authState.isAuthenticated)
@@ -401,8 +395,8 @@ struct AuthStateExtendedTests {
         #expect(authState.deviceFlowState == nil)
     }
 
-    @Test("Requesting device code state")
-    func requestingDeviceCodeState() {
+    @Test
+    func `Requesting device code state`() {
         let authState = AuthState.requestingDeviceCode
 
         #expect(!authState.isAuthenticated)
@@ -413,10 +407,9 @@ struct AuthStateExtendedTests {
 
 // MARK: - GitHubUser Tests
 
-@Suite("GitHubUser Tests")
 struct GitHubUserTests {
-    @Test("GitHubUser decodes from JSON")
-    func userDecodesFromJSON() throws {
+    @Test
+    func `GitHubUser decodes from JSON`() throws {
         let json = """
         {
             "login": "octocat",
@@ -437,7 +430,7 @@ struct GitHubUserTests {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try #require(json.data(using: .utf8))
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let user = try decoder.decode(GitHubUser.self, from: data)
@@ -451,8 +444,8 @@ struct GitHubUserTests {
         #expect(user.followers == 100)
     }
 
-    @Test("GitHubUser decodes with optional fields missing")
-    func userDecodesWithMissingOptionals() throws {
+    @Test
+    func `GitHubUser decodes with optional fields missing`() throws {
         let json = """
         {
             "login": "minimal",
@@ -470,7 +463,7 @@ struct GitHubUserTests {
         }
         """
 
-        let data = json.data(using: .utf8)!
+        let data = try #require(json.data(using: .utf8))
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let user = try decoder.decode(GitHubUser.self, from: data)
@@ -533,5 +526,122 @@ enum ServiceTestHelpers {
             lastReadAt: nil,
             url: "https://api.github.com/notifications/threads/\(id)",
             subscriptionUrl: "https://api.github.com/notifications/threads/\(id)/subscription")
+    }
+}
+
+// MARK: - Pull Request State Tests
+
+struct PullRequestStateResponseTests {
+    @Test
+    func `Merged pull request maps to merged status`() throws {
+        let json = #"{"state":"closed","merged":true,"draft":false}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .merged)
+        #expect(response.status.isResolved)
+        #expect(response.isDraft == false)
+    }
+
+    @Test
+    func `Closed unmerged pull request maps to closed status`() throws {
+        let json = #"{"state":"closed","merged":false}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .closed)
+        #expect(response.status.isResolved)
+    }
+
+    @Test
+    func `Open pull request maps to open status`() throws {
+        let json = #"{"state":"open","merged":false,"draft":true}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .open)
+        #expect(!response.status.isResolved)
+        #expect(response.isDraft)
+    }
+
+    @Test
+    func `Missing optional fields default safely`() throws {
+        let json = #"{"state":"open"}"#
+        let data = try #require(json.data(using: .utf8))
+        let response = try JSONDecoder().decode(PullRequestStateResponse.self, from: data)
+
+        #expect(response.status == .open)
+        #expect(response.isDraft == false)
+    }
+
+    @Test
+    func `Pull request status resolution flags are correct`() {
+        #expect(PullRequestStatus.open.isResolved == false)
+        #expect(PullRequestStatus.closed.isResolved)
+        #expect(PullRequestStatus.merged.isResolved)
+    }
+}
+
+@Suite(.serialized)
+@MainActor
+struct CachedPullRequestStateTests {
+    @Test
+    func `Cached state is valid until the notification updates`() {
+        let notification = ServiceTestHelpers.makeNotification(type: .pullRequest)
+        let cached = CachedPullRequestState(
+            notificationId: notification.id,
+            notificationUpdatedAt: notification.updatedAt,
+            status: .merged,
+            isDraft: false)
+
+        #expect(cached.isValid(for: notification))
+        #expect(cached.status == .merged)
+        #expect(cached.isResolved)
+
+        // A newer notification invalidates the cached state.
+        let updated = ServiceTestHelpers.makeNotification(type: .pullRequest)
+        let newer = GitHubNotification(
+            id: updated.id,
+            repository: updated.repository,
+            subject: updated.subject,
+            reason: updated.reason,
+            unread: updated.unread,
+            updatedAt: cached.notificationUpdatedAt.addingTimeInterval(60),
+            lastReadAt: nil,
+            url: updated.url,
+            subscriptionUrl: updated.subscriptionUrl)
+
+        #expect(!cached.isValid(for: newer))
+    }
+
+    @Test
+    func `DataStore saves, fetches, and updates pull request state`() throws {
+        let store = try DataStore(inMemory: true)
+        let notification = ServiceTestHelpers.makeNotification(id: "pr-1", type: .pullRequest)
+
+        #expect(try store.fetchPullRequestState(for: "pr-1") == nil)
+
+        try store.savePullRequestState(.open, isDraft: false, for: notification)
+        let open = try store.fetchPullRequestState(for: "pr-1")
+        #expect(open?.status == .open)
+        #expect(open?.isResolved == false)
+
+        // Upsert updates the existing row rather than inserting a duplicate.
+        try store.savePullRequestState(.merged, isDraft: false, for: notification)
+        let merged = try store.fetchPullRequestState(for: "pr-1")
+        #expect(merged?.status == .merged)
+        #expect(merged?.isResolved == true)
+    }
+
+    @Test
+    func `Cleanup removes pull request states immediately when age is zero`() throws {
+        let store = try DataStore(inMemory: true)
+        let notification = ServiceTestHelpers.makeNotification(id: "pr-cleanup", type: .pullRequest)
+
+        try store.savePullRequestState(.merged, isDraft: false, for: notification)
+        #expect(try store.fetchPullRequestState(for: "pr-cleanup") != nil)
+
+        try store.cleanupOldPullRequestStates(olderThan: 0)
+        #expect(try store.fetchPullRequestState(for: "pr-cleanup") == nil)
     }
 }

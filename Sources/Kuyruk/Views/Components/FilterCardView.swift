@@ -30,7 +30,6 @@ struct FilterCardView: View {
 
     // MARK: - Subviews
 
-    @ViewBuilder
     private var iconView: some View {
         Image(systemName: self.filter.iconName)
             .font(.system(size: 24, weight: .bold))
@@ -38,13 +37,14 @@ struct FilterCardView: View {
             .frame(width: 32, height: 32)
     }
 
-    @ViewBuilder
     private var countView: some View {
         Text("\(self.count)")
-            .font(.title)
+            .font(.title2)
             .fontWeight(.bold)
             .foregroundStyle(.white)
             .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
     }
 
     @ViewBuilder

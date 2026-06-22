@@ -6,11 +6,13 @@ struct AISettingsView: View {
     @Environment(AuthService.self) private var authService
 
     @AppStorage("aiSummariesEnabled") private var summariesEnabled: Bool = true
+    @State private var customModelFetchTask: Task<Void, Never>?
 
     var body: some View {
         Form {
             self.accountSection
             self.aiSummariesSection
+            self.backendSection
             self.modelPickerSection
             self.usageSection
         }
@@ -23,7 +25,6 @@ struct AISettingsView: View {
 
     // MARK: - Account Section
 
-    @ViewBuilder
     private var accountSection: some View {
         Section("GitHub Account") {
             if self.authService.state.isAuthenticated {
@@ -70,7 +71,6 @@ struct AISettingsView: View {
 
     // MARK: - AI Summaries Section
 
-    @ViewBuilder
     private var aiSummariesSection: some View {
         Section {
             Toggle("Enable TL;DR Summaries", isOn: self.$summariesEnabled)
@@ -85,9 +85,88 @@ struct AISettingsView: View {
         }
     }
 
+    // MARK: - Backend Section
+
+    private var backendSection: some View {
+        Section {
+            Picker("Backend", selection: self.backendBinding) {
+                ForEach(AIBackend.allCases) { backend in
+                    Text(backend.displayName).tag(backend)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if self.modelsService.backend == .custom {
+                TextField("Base URL", text: self.customBaseURLBinding, prompt: Text("http://localhost:1337/v1"))
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+
+                SecureField("API Key (optional)", text: self.customAPIKeyBinding)
+                    .textFieldStyle(.roundedBorder)
+
+                Text(
+                    """
+                    Point Kuyruk at any OpenAI-compatible endpoint (e.g. a local vekil proxy). \
+                    Include the path prefix the proxy expects, such as /v1.
+                    """)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Uses the GitHub Models API with your GitHub account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Label("AI Backend", systemImage: "server.rack")
+        }
+    }
+
+    /// Binding for the active backend; refetches models when it changes.
+    private var backendBinding: Binding<AIBackend> {
+        Binding(
+            get: { self.modelsService.backend },
+            set: { newBackend in
+                guard newBackend != self.modelsService.backend else { return }
+                self.modelsService.backend = newBackend
+                Task { await self.modelsService.fetchAvailableModels() }
+            })
+    }
+
+    /// Binding for the custom base URL; debounces model refetches while the user types.
+    private var customBaseURLBinding: Binding<String> {
+        Binding(
+            get: { self.modelsService.customBaseURL },
+            set: { newValue in
+                guard newValue != self.modelsService.customBaseURL else { return }
+                self.modelsService.customBaseURL = newValue
+                self.scheduleCustomModelFetch()
+            })
+    }
+
+    /// Schedules a latest-value catalog fetch after URL editing settles.
+    private func scheduleCustomModelFetch() {
+        self.customModelFetchTask?.cancel()
+        self.customModelFetchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await self.modelsService.fetchAvailableModels()
+        }
+    }
+
+    /// Binding for the custom API key.
+    private var customAPIKeyBinding: Binding<String> {
+        Binding(
+            get: { self.modelsService.customAPIKey ?? "" },
+            set: { self.modelsService.customAPIKey = $0.isEmpty ? nil : $0 })
+    }
+
     // MARK: - Model Picker Section
 
-    @ViewBuilder
     private var modelPickerSection: some View {
         Section("Model") {
             if self.modelsService.isLoadingModels {
@@ -122,7 +201,7 @@ struct AISettingsView: View {
                 self.modelPicker
             }
         }
-        .disabled(!self.summariesEnabled || !self.authService.state.isAuthenticated)
+        .disabled(!self.summariesEnabled || !self.modelsService.isReadyToListModels)
     }
 
     @ViewBuilder
@@ -166,7 +245,6 @@ struct AISettingsView: View {
 
     // MARK: - Usage Section
 
-    @ViewBuilder
     private var usageSection: some View {
         Section("Usage") {
             if let remaining = modelsService.rateLimitRemaining {

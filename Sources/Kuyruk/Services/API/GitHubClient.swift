@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur when interacting with the GitHub API.
-enum GitHubError: Error, LocalizedError, Sendable {
+enum GitHubError: Error, LocalizedError {
     case unauthorized
     case authenticationFailed(String)
     case invalidResponse
@@ -103,10 +103,36 @@ enum GitHubEndpoint {
     }
 }
 
+/// Minimal interface used by the notifications UI to fetch and mutate GitHub state.
+@MainActor
+protocol GitHubClienting: AnyObject {
+    var isCacheValid: Bool { get }
+    var hasConditionalHeaders: Bool { get }
+    var cachedNotificationCount: Int? { get }
+
+    func fetchAllNotificationsProgressive(
+        all: Bool,
+        participating: Bool,
+        onBatchReceived: @escaping ([GitHubNotification]) -> Void) async throws -> [GitHubNotification]?
+
+    func fetchAllNotificationsForced(
+        all: Bool,
+        participating: Bool) async throws -> [GitHubNotification]
+
+    func updateCachedNotification(_ notification: GitHubNotification)
+    func markAsRead(threadId: String) async throws
+
+    func fetchPullRequestState(
+        owner: String,
+        repo: String,
+        number: Int) async throws -> PullRequestStateResponse
+}
+
 /// GitHub API client for making authenticated requests.
 @MainActor
 @Observable
 final class GitHubClient {
+
     // MARK: - Properties
 
     private let baseUrl = "https://api.github.com"
@@ -126,6 +152,7 @@ final class GitHubClient {
         static let etag = "notifications.etag"
         static let lastModified = "notifications.lastModified"
         static let cacheTimestamp = "notifications.cacheTimestamp"
+        static let notificationCount = "notifications.cacheCount"
     }
 
     /// Cached ETag for notifications endpoint (persisted to UserDefaults)
@@ -152,6 +179,14 @@ final class GitHubClient {
     private var cacheTimestamp: Date? {
         get { UserDefaults.standard.object(forKey: CacheKeys.cacheTimestamp) as? Date }
         set { UserDefaults.standard.set(newValue, forKey: CacheKeys.cacheTimestamp) }
+    }
+
+    /// Count returned by the last successful full notifications fetch.
+    /// Used to distinguish a legitimate empty inbox from missing local cache rows
+    /// when a later conditional request returns 304.
+    private(set) var cachedNotificationCount: Int? {
+        get { UserDefaults.standard.object(forKey: CacheKeys.notificationCount) as? Int }
+        set { UserDefaults.standard.set(newValue, forKey: CacheKeys.notificationCount) }
     }
 
     /// Cache TTL in seconds (default: 30 seconds)
@@ -257,6 +292,7 @@ final class GitHubClient {
             }
 
             DiagnosticsLogger.info("Fetched \(allNotifications.count) notifications total", category: .api)
+            self.cachedNotificationCount = allNotifications.count
             return allNotifications
         }
     }
@@ -312,6 +348,7 @@ final class GitHubClient {
             // Update cache
             self.cachedNotifications = allNotifications
             self.cacheTimestamp = Date()
+            self.cachedNotificationCount = allNotifications.count
 
             DiagnosticsLogger.info("Fetched \(allNotifications.count) notifications total", category: .api)
             return allNotifications
@@ -332,6 +369,7 @@ final class GitHubClient {
     func invalidateCache() {
         self.cachedNotifications = nil
         self.cacheTimestamp = nil
+        self.cachedNotificationCount = nil
         self.notificationsETag = nil
         self.notificationsLastModified = nil
         DiagnosticsLogger.debug("Notifications cache invalidated", category: .api)
@@ -564,6 +602,19 @@ final class GitHubClient {
         try await self.request(.user)
     }
 
+    /// Fetches a pull request's resolution state (open / closed / merged / draft).
+    /// - Parameters:
+    ///   - owner: Repository owner login.
+    ///   - repo: Repository name.
+    ///   - number: Pull request number.
+    /// - Returns: The decoded pull request state.
+    func fetchPullRequestState(
+        owner: String,
+        repo: String,
+        number: Int) async throws -> PullRequestStateResponse {
+        try await self.request(.pullRequest(owner: owner, repo: repo, number: number))
+    }
+
     // MARK: - Private Methods
 
     private func request<T: Decodable>(_ endpoint: GitHubEndpoint) async throws -> T {
@@ -653,3 +704,5 @@ final class GitHubClient {
         }
     }
 }
+
+extension GitHubClient: GitHubClienting {}

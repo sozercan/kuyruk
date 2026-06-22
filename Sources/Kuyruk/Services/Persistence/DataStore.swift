@@ -5,6 +5,7 @@ import SwiftData
 @MainActor
 @Observable
 final class DataStore {
+
     // MARK: - Properties
 
     private let modelContainer: ModelContainer
@@ -20,6 +21,7 @@ final class DataStore {
             CachedNotification.self,
             CachedRepository.self,
             CachedSummary.self,
+            CachedPullRequestState.self,
         ])
 
         let modelConfiguration = ModelConfiguration(
@@ -43,6 +45,7 @@ final class DataStore {
             CachedNotification.self,
             CachedRepository.self,
             CachedSummary.self,
+            CachedPullRequestState.self,
         ])
 
         let modelConfiguration = ModelConfiguration(
@@ -189,9 +192,9 @@ final class DataStore {
     /// Fetches all currently snoozed notifications.
     func fetchSnoozedNotifications() throws -> [CachedNotification] {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let minimumDate = Date.distantPast
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted },
+            predicate: #Predicate { ($0.snoozedUntil ?? minimumDate) > now && !$0.isDeleted },
             sortBy: [SortDescriptor(\.snoozedUntil)])
 
         return try self.modelContext.fetch(descriptor)
@@ -200,9 +203,9 @@ final class DataStore {
     /// Gets the count of snoozed notifications.
     func snoozedCount() throws -> Int {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let minimumDate = Date.distantPast
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! > now && !$0.isDeleted })
+            predicate: #Predicate { ($0.snoozedUntil ?? minimumDate) > now && !$0.isDeleted })
 
         return try self.modelContext.fetchCount(descriptor)
     }
@@ -210,9 +213,9 @@ final class DataStore {
     /// Unsnoozes expired notifications (snooze time has passed).
     func unsnoozeExpiredNotifications() throws -> Int {
         let now = Date()
-        // swiftlint:disable:next force_unwrapping
+        let maximumDate = Date.distantFuture
         let descriptor = FetchDescriptor<CachedNotification>(
-            predicate: #Predicate { $0.snoozedUntil != nil && $0.snoozedUntil! <= now && !$0.isDeleted })
+            predicate: #Predicate { ($0.snoozedUntil ?? maximumDate) <= now && !$0.isDeleted })
 
         let expired = try self.modelContext.fetch(descriptor)
 
@@ -416,6 +419,73 @@ final class DataStore {
         if !old.isEmpty {
             try self.modelContext.save()
             DiagnosticsLogger.info("Cleaned up \(old.count) old summaries", category: .data)
+        }
+    }
+
+    // MARK: - Pull Request State
+
+    /// Saves or updates the cached resolution state for a pull request notification.
+    /// - Parameters:
+    ///   - status: The resolution status (open / closed / merged).
+    ///   - isDraft: Whether the pull request is a draft.
+    ///   - notification: The notification this state is for.
+    func savePullRequestState(
+        _ status: PullRequestStatus,
+        isDraft: Bool,
+        for notification: GitHubNotification) throws {
+        let notificationId = notification.id
+        let descriptor = FetchDescriptor<CachedPullRequestState>(
+            predicate: #Predicate { $0.notificationId == notificationId })
+
+        if let existing = try modelContext.fetch(descriptor).first {
+            existing.statusRaw = status.rawValue
+            existing.isDraft = isDraft
+            existing.notificationUpdatedAt = notification.updatedAt
+            existing.fetchedAt = Date()
+        } else {
+            let cached = CachedPullRequestState(
+                notificationId: notification.id,
+                notificationUpdatedAt: notification.updatedAt,
+                status: status,
+                isDraft: isDraft)
+            self.modelContext.insert(cached)
+        }
+
+        try self.modelContext.save()
+        DiagnosticsLogger.debug(
+            "Saved PR state (\(status.rawValue)) for notification \(notification.id)",
+            category: .data)
+    }
+
+    /// Fetches the cached pull request state for a notification.
+    /// - Parameter notificationId: The notification ID to look up.
+    /// - Returns: The cached state if found.
+    func fetchPullRequestState(for notificationId: String) throws -> CachedPullRequestState? {
+        let descriptor = FetchDescriptor<CachedPullRequestState>(
+            predicate: #Predicate { $0.notificationId == notificationId })
+
+        return try self.modelContext.fetch(descriptor).first
+    }
+
+    /// Cleans up old pull request states to prevent unbounded storage growth.
+    /// - Parameter days: Delete states older than this many days (default: 7).
+    func cleanupOldPullRequestStates(olderThan days: Int = 7) throws {
+        guard let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else {
+            return
+        }
+
+        let descriptor = FetchDescriptor<CachedPullRequestState>(
+            predicate: #Predicate { $0.fetchedAt < cutoffDate })
+
+        let old = try self.modelContext.fetch(descriptor)
+
+        for state in old {
+            self.modelContext.delete(state)
+        }
+
+        if !old.isEmpty {
+            try self.modelContext.save()
+            DiagnosticsLogger.info("Cleaned up \(old.count) old PR states", category: .data)
         }
     }
 

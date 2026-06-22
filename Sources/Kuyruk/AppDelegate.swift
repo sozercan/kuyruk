@@ -3,6 +3,7 @@ import AppKit
 /// App delegate for handling application lifecycle and menu bar support
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+
     // MARK: - Properties
 
     private var statusItem: NSStatusItem?

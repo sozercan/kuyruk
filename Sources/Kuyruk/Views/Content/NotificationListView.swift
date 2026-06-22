@@ -27,7 +27,6 @@ struct NotificationListView: View {
 
     // MARK: - States
 
-    @ViewBuilder
     private var loadingState: some View {
         ContentUnavailableView {
             ProgressView()
@@ -37,7 +36,6 @@ struct NotificationListView: View {
         }
     }
 
-    @ViewBuilder
     private var emptyState: some View {
         ContentUnavailableView {
             Label(self.viewModel.selectedFilter.emptyStateTitle, systemImage: self.emptyStateIcon)
@@ -77,7 +75,6 @@ struct NotificationListView: View {
         }
     }
 
-    @ViewBuilder
     private var errorState: some View {
         ContentUnavailableView {
             Label("Something Went Wrong", systemImage: "exclamationmark.triangle")
@@ -99,7 +96,6 @@ struct NotificationListView: View {
 
     // MARK: - Notifications List
 
-    @ViewBuilder
     private var notificationsList: some View {
         List(selection: Binding(
             get: { self.viewModel.selectedNotification?.id },
@@ -148,10 +144,10 @@ struct NotificationListView: View {
                 }
             }
             .listStyle(.inset)
-            .scrollClipDisabled()
-            .scrollContentBackground(.visible)
-            .contentMargins(.vertical, 0, for: .scrollContent)
-            .overlay(alignment: .top) {
+                .scrollClipDisabled()
+                .scrollContentBackground(.visible)
+                .contentMargins(.vertical, 0, for: .scrollContent)
+                .overlay(alignment: .top) {
                     // Show refreshing indicator at top when updating in background
                     if self.viewModel.isRefreshing {
                         HStack(spacing: 8) {

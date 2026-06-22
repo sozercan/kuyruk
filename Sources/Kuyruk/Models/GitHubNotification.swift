@@ -1,7 +1,7 @@
 import Foundation
 
 /// The type of subject in a GitHub notification.
-enum SubjectType: String, Codable, Sendable {
+enum SubjectType: String, Codable {
     case issue = "Issue"
     case pullRequest = "PullRequest"
     case commit = "Commit"
@@ -41,7 +41,7 @@ enum SubjectType: String, Codable, Sendable {
 }
 
 /// The subject of a GitHub notification (issue, PR, etc.).
-struct NotificationSubject: Codable, Sendable, Hashable {
+struct NotificationSubject: Codable, Hashable {
     let title: String
     let url: String?
     let latestCommentUrl: String?
@@ -56,7 +56,7 @@ struct NotificationSubject: Codable, Sendable, Hashable {
 }
 
 /// Represents a GitHub notification from the API.
-struct GitHubNotification: Codable, Sendable, Identifiable, Hashable {
+struct GitHubNotification: Codable, Identifiable, Hashable {
     let id: String
     let repository: Repository
     let subject: NotificationSubject

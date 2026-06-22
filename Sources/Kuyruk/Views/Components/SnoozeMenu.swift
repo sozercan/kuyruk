@@ -151,7 +151,6 @@ struct SnoozeMenu: View {
         }
     }
 
-    @ViewBuilder
     private var customDatePickerSheet: some View {
         VStack(spacing: 20) {
             Text("Snooze Until")

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a GitHub repository from the notifications API.
-struct Repository: Codable, Sendable, Identifiable, Hashable {
+struct Repository: Codable, Identifiable, Hashable {
     let id: Int
     let nodeId: String
     let name: String
@@ -40,7 +40,7 @@ struct Repository: Codable, Sendable, Identifiable, Hashable {
 }
 
 /// Owner of a GitHub repository.
-struct RepositoryOwner: Codable, Sendable, Hashable {
+struct RepositoryOwner: Codable, Hashable {
     let login: String
     let id: Int
     let nodeId: String

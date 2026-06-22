@@ -245,19 +245,19 @@ struct SyncStatusBar: View {
 
 /// Pending actions indicator showing queued offline actions
 struct PendingActionsView: View {
-    let count: Int
+    let pendingActionCount: Int
 
-    private var isEmpty: Bool {
-        self.isEmpty
+    private var hasPendingActions: Bool {
+        self.pendingActionCount > 0
     }
 
     var body: some View {
-        if !self.isEmpty {
+        if self.hasPendingActions {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption2)
 
-                Text("\(self.count) pending")
+                Text("\(self.pendingActionCount) pending")
                     .font(.caption2)
             }
             .foregroundStyle(.orange)

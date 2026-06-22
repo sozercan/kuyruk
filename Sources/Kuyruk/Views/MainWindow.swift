@@ -5,10 +5,10 @@ struct MainWindow: View {
     @Environment(AuthService.self) private var authService
     @Environment(NotificationsViewModel.self) private var viewModel
 
-    // Keyboard navigation state
+    /// Keyboard navigation state
     @FocusState private var isListFocused: Bool
 
-    // Command palette state
+    /// Command palette state
     @State private var showCommandPalette: Bool = false
 
     var body: some View {
@@ -26,12 +26,8 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
-        .onAppear {
-            self.isListFocused = true
-        }
     }
 
-    @ViewBuilder
     private var checkingAuthContent: some View {
         VStack(spacing: 16) {
             ProgressView()
@@ -39,19 +35,15 @@ struct MainWindow: View {
         }
     }
 
-    @ViewBuilder
     private var authenticatedContent: some View {
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
-        } content: {
-            NotificationListView()
-                .navigationSplitViewColumnWidth(min: 350, ideal: 450)
-                .focused(self.$isListFocused)
-        } detail: {
-            NotificationDetailView()
+        Group {
+            switch self.viewModel.appDestination {
+            case .notifications:
+                self.notificationsShell
+            case .digest:
+                self.digestShell
+            }
         }
-        .modifier(KeyboardNavigationModifier(viewModel: self.viewModel))
         .sheet(isPresented: self.$showCommandPalette) {
             CommandPalette()
                 .environment(self.viewModel)
@@ -64,9 +56,40 @@ struct MainWindow: View {
             .keyboardShortcut("k", modifiers: .command)
             .hidden()
         }
+        .onAppear {
+            self.isListFocused = self.viewModel.appDestination == .notifications
+        }
+        .onChange(of: self.viewModel.appDestination) { _, destination in
+            self.isListFocused = destination == .notifications
+        }
     }
 
-    @ViewBuilder
+    private var notificationsShell: some View {
+        NavigationSplitView {
+            self.sidebarColumn
+        } content: {
+            NotificationListView()
+                .navigationSplitViewColumnWidth(min: 350, ideal: 450)
+                .focused(self.$isListFocused)
+        } detail: {
+            NotificationDetailView()
+        }
+        .modifier(KeyboardNavigationModifier(viewModel: self.viewModel))
+    }
+
+    private var digestShell: some View {
+        NavigationSplitView {
+            self.sidebarColumn
+        } detail: {
+            DigestView()
+        }
+    }
+
+    private var sidebarColumn: some View {
+        SidebarView()
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
+    }
+
     private var unauthenticatedContent: some View {
         VStack(spacing: 24) {
             switch self.authService.state {
@@ -247,26 +270,32 @@ struct KeyboardNavigationModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onKeyPress(.downArrow) {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.selectNextNotification()
                 return .handled
             }
             .onKeyPress(.upArrow) {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.selectPreviousNotification()
                 return .handled
             }
             .onKeyPress("j") {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.selectNextNotification()
                 return .handled
             }
             .onKeyPress("k") {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.selectPreviousNotification()
                 return .handled
             }
             .onKeyPress("o") {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.openSelectedInBrowser()
                 return .handled
             }
             .onKeyPress(.return) {
+                guard self.viewModel.appDestination == .notifications else { return .ignored }
                 self.openSelectedInBrowser()
                 return .handled
             }
